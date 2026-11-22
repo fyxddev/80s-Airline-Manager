@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Airline Manager</title>
+<link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css">
+<link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-solid-rounded/css/uicons-solid-rounded.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <header><div class="brand"><div class="logo"><i class="fi fi-sr-plane-departure"></i></div><div class="name" id="hName"></div></div><div class="cash num" id="hCash"></div></header>
+  <div class="stats" id="hStats"></div>
+  <main id="view"></main>
+</div>
+<nav id="nav"></nav>
+<div id="ov"><div class="dlg" id="dlg"></div></div>
+<script>
+// ==================== DATA (data/*.json) ====================
+let HUBS=[],COUNTRIES=[],AIRCRAFT=[],FAMILIES={},MAKERS={};
+const flag=iso=>String.fromCodePoint(...[...iso].map(c=>127397+c.charCodeAt(0)));
+const MAX_GATES=7,SELL_RATE=.6,SAVE_KEY='airline-manager-save-v4',WEEK=10080,STEP=30,TURN=60,TA_MIN=30,DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],PM={Y:1,W:1.6,C:3.2};
+const $=s=>document.querySelector(s),fmt=n=>'$'+Math.round(n).toLocaleString('en-US'),fmtN=n=>Math.round(n).toLocaleString('en-US');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hub=id=>HUBS.find(h=>h.id===id),country=iso=>COUNTRIES.find(c=>c.iso===iso),model=id=>AIRCRAFT.find(a=>a.id===id);
+const plane=id=>S.planes.find(p=>p.id===id),route=id=>S.routes.find(r=>r.id===id);
+
+// ==================== STATE ====================
+const fresh=()=>({started:false,cash:1000000,vault:0,totalRevenue:0,airlineName:'Sky Pacific Airlines',homeCountry:'ID',history:{nw:[],rev:[]},hubs:{},gates:{},routes:[],nextRouteId:1,planes:[],nextPlaneId:1,regCounter:{},clock:540,pending:[],cfgs:{},seq:0});
+let S=fresh();
+const UI={tab:'home',owned:'routes',buy:'hubs',q:'',maker:null,openAc:'',openSort:'dem_desc',rotMode:'both',rotErr:'',drafts:{},buyQ:1,refit:null,open:{},openM:{},page:null,rangeHub:null,rangeKm:3000};
+function save(){if(!window.READY)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(S))}catch(e){}}
+function load(){try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return;S=Object.assign(fresh(),JSON.parse(raw));S.planes=S.planes.filter(p=>model(p.modelId));S.planes.forEach(p=>p.sched=p.sched||[])}catch(e){S=fresh()}}
+function resetGame(){confirmDlg('New airline?','Your current progress will be deleted.','Start over',()=>{try{localStorage.removeItem(SAVE_KEY)}catch(e){}location.href='index.html'},true)}
+
+// ==================== HELPERS ====================
+const ownedHubs=()=>Object.keys(S.hubs),gateCount=id=>S.gates[id]||0,gateUsed=id=>S.routes.filter(r=>r.to===id).length;
+const totalGates=()=>Object.values(S.gates).reduce((a,b)=>a+b,0);
+const airlineCode=()=>(S.airlineName.replace(/[^A-Za-z]/g,'').slice(0,2).toUpperCase()||'AM');
+const flightNos=r=>[airlineCode()+(5249+2*r.id),airlineCode()+(5250+2*r.id)];
+const hubName=h=>`${h.flag} ${esc(h.city)} <span class="s">${h.code} · ${h.icao}</span>`;
+const dem=h=>`${h.demand.toFixed(1)} · ${fmtN(h.demand*1000)} pax`;
+function dist(a,b){const A=hub(a),B=hub(b),r=x=>x*Math.PI/180,dl=r(B.lat-A.lat),dn=r(B.lon-A.lon);const h=Math.sin(dl/2)**2+Math.cos(r(A.lat))*Math.cos(r(B.lat))*Math.sin(dn/2)**2;return Math.round(12742*Math.asin(Math.sqrt(h)))}
+function baseTicket(d){let b=d*.12;if(d>5000)b*=1.15;if(d>9000)b*=1.3;return Math.max(80,Math.round(b))}
+const ticketRange=d=>{const b=baseTicket(d);return{min:Math.round(b*.7),max:Math.round(b*1.6),step:Math.max(1,Math.round(b*.02))}};
+const fm=(d,spd)=>Math.round((d/spd*60+25)/5)*5;
+const hhmm=m=>{m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')};
+const dur=m=>Math.floor(m/60)+':'+String(m%60).padStart(2,'0');
+const clockStr=t=>DAYS[Math.floor(t/1440)%7]+' '+hhmm(t);
+function newReg(){const c=country(S.homeCountry),n=(S.regCounter[S.homeCountry]||0)+1;S.regCounter[S.homeCountry]=n;if(c.prefix==='N')return 'N'+(100+n);const L='ABCDEFGHJKLMNPQRSTUVWXYZ';let s='',k=n;for(let i=0;i<3;i++){s=L[k%24]+s;k=Math.floor(k/24)}return c.prefix+'-'+s}
+
+// ---- dynamic demand: differs per route and shifts every week
+const routeM=(a,b,d)=>Math.round(1000*Math.sqrt(hub(a).demand*hub(b).demand)/(1+d/8000));
+function rnd(str){let h=2166136261;for(const c of str){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}h^=h>>>13;h=Math.imul(h,1274126177);return((h^h>>>16)>>>0)/4294967296}
+function calcDemand(r,week){
+  const k=r.from+'>'+r.to,base=routeM(r.from,r.to,r.distance)/4.345;
+  const f=(.75+.5*rnd(k))*(1+.15*Math.sin(2*Math.PI*(week/52+rnd(k+'p'))))*(1+(rnd(k+week)-.5)*.14);
+  const T=Math.max(20,Math.round(base*f)),C=Math.round(T*(.03+.06*rnd(k+'c'))),W=Math.round(T*(.04+.04*rnd(k+'w')));
+  return{Y:T-C-W,W,C};
+}
+const sumD=d=>d.Y+d.W+d.C;
+function newWeek(r,w){r.week=w;r.demand=calcDemand(r,w)}
+const openCost=(from,to,d)=>Math.max(5000,Math.round((3000+routeM(from,to,d)/4.345*2.5)/1000)*1000);
+
+// ---- aircraft / flights
+const clone=o=>JSON.parse(JSON.stringify(o));
+const KEYS=['F','C','W','Y'],CNAME={F:'First',C:'Business',W:'Premium eco.',Y:'Economy'},PMUL={Y:1,W:1.6,C:3.2,F:6},SC=.02;
+// [name, price per seat, comfort rating, space factor (C/F)]
+const PROD={Y:[['Super Slim',2000,40],['Slim',2500,52],['Standard',3000,64],['Comfort',4000,70],['Luxury',5000,76]],W:[['Basic',7000,73],['Standard',7500,80],['Comfort',8000,87],['Luxury',8500,94]],C:[['European',6000,70,1.5],['Regional',8000,82,2],['Full Flat',20000,98,3.5],['Parallel Flat',22000,102,3.8],['Staggered',25000,104,4],['Reverse Herringbone',30000,107,4.2]],F:[['Regional',12000,100,4],['Solo Suite',40000,108,6],['Open Suite',40000,110,6.5]]};
+const SPACE={Y:p=>p.pt/30,W:p=>1.6*p.pt/36,C:p=>PROD.C[p.p][3],F:p=>PROD.F[p.p][3]};
+const rate=(k,p)=>{const b=PROD[k][p.p][2];return Math.max(0,Math.min(120,Math.round(k==='Y'?b+(p.pt-30)*3:k==='W'?b+(p.pt-36)*2.5:b)))};
+const seatsOf=c=>KEYS.reduce((n,k)=>n+c[k].n,0),usedSpace=c=>KEYS.reduce((n,k)=>n+c[k].n*SPACE[k](c[k]),0);
+const cfgCost=c=>Math.round(KEYS.reduce((n,k)=>n+c[k].n*PROD[k][c[k].p][1],0)*SC);
+const cfgStr=c=>KEYS.filter(k=>c[k].n).map(k=>k+c[k].n).join(' / ');
+function defaultCfg(m){const c={F:{n:0,p:0},C:{n:0,p:0},W:{n:0,p:0,pt:36},Y:{n:0,p:2,pt:30}};if(m.seats>80){c.C={n:Math.round(m.seats*.05),p:1};c.W={n:Math.round(m.seats*.06),p:0,pt:36}}c.Y.n=Math.floor(m.seats-usedSpace(c));return c}
+function fitCfg(c,cap){for(const k of ['Y','W','C','F'])while(usedSpace(c)>cap+1e-6&&c[k].n>0)c[k].n--}
+const cfgOf=p=>p.cfg||(p.cfg=defaultCfg(model(p.modelId)));
+const FR={Y:1,W:1.79,C:3.93,F:7.5},taOf=s=>s.ta??TURN,pad=n=>String(n).padStart(2,'0');
+const defFares=d=>{const b=baseTicket(d);return{Y:b,W:Math.round(b*FR.W),C:Math.round(b*FR.C),F:Math.round(b*FR.F)}};
+const fareOf=r=>r.fares||(r.fares={...defFares(r.distance),...(r.ticket?{Y:r.ticket}:{})});
+const lfk=(r,k)=>Math.min(.98,.78*Math.pow(baseTicket(r.distance)*FR[k]/fareOf(r)[k],1.3));
+const lf=r=>lfk(r,'Y');
+const legCost=(m,r)=>Math.round(m.fuel*(2+8*r.distance/2000));
+const legCap=(m,r,cfg)=>{const c={};for(const k of ['Y','W','C','F'])c[k]=Math.round(cfg[k].n*Math.min(.98,lfk(r,k)*(.7+rate(k,cfg[k])/213)));return c};
+// Each rotation (oldest first) takes its weekly passengers out of the route demand, like subtraction.
+// Later rotations only get what is left, and earlier ones never lose passengers to them.
+function alloc(r){
+  const rem={...r.demand},out=new Map(),items=[],f=fareOf(r);
+  S.planes.forEach(p=>p.sched.forEach(s=>{if(s.rid===r.id)items.push([p,s])}));
+  items.sort((a,b)=>(a[1].seq||0)-(b[1].seq||0));
+  for(const [p,s] of items){const m=model(p.modelId),cap=legCap(m,r,cfgOf(p)),legs=dayCount(s)*2,pax={};let rev=0;
+    for(const k of ['Y','W','C','F']){const pool=k==='F'?'C':k,w=Math.max(0,Math.min(legs*cap[k],Math.floor(rem[pool])));rem[pool]-=w;pax[k]=legs?w/legs:0;rev+=w*f[k]}
+    out.set(s,{pax,rev,legs,cost:legs*legCost(m,r)})}
+  return{out,rem};
+}
+const dayCount=s=>s.days.filter(Boolean).length;
+const legsWeek=r=>S.planes.reduce((n,p)=>n+p.sched.filter(s=>s.rid===r.id).reduce((a,s)=>a+dayCount(s)*2,0),0);
+function rotProfit(p,s){const r=route(s.rid),a=r&&alloc(r).out.get(s);return a?a.rev-a.cost:0}
+function capLine(r){const cap=S.planes.reduce((n,p)=>n+p.sched.filter(s=>s.rid===r.id).reduce((a,s)=>a+dayCount(s)*2*seatsOf(cfgOf(p)),0),0),T=sumD(r.demand),ratio=T?cap*.78/T:0,over=ratio>1.15;
+  return `<div class="row s" style="margin-top:12px"><span>Capacity ${fmtN(cap)} seats/wk vs demand ${fmtN(T)}</span><span class="pill ${over||!cap?'':'on'}" style="${over?'background:rgba(212,55,44,.12);color:var(--bad)':''}">${!cap?'No flights':over?'Oversupplied':ratio<.5?'Room to grow':'Balanced'}</span></div>`}
+const weekHours=p=>p.sched.reduce((h,s)=>{const r=route(s.rid);return r?h+dayCount(s)*2*fm(r.distance,model(p.modelId).speed)/60:h},0);
+function estAdd(p,r){const s={rid:r.id,dep:0,days:[1,1,1,1,1,1,1].map(Boolean),seq:1e12};p.sched.push(s);const v=rotProfit(p,s);p.sched.pop();return v}
+function weekProfit(p){return p.sched.reduce((t,s)=>t+rotProfit(p,s),0)}
+function hasConflict(p,list){
+  const ivs=[];list.forEach((x,i)=>{const r=route(x.rid);if(!r)return;const d=2*fm(r.distance,model(p.modelId).speed)+taOf(x)+30;x.days.forEach((on,D)=>{if(on)ivs.push([D*1440+x.dep,D*1440+x.dep+d,i])})});
+  for(let i=0;i<ivs.length;i++)for(let j=i+1;j<ivs.length;j++){const a=ivs[i],b=ivs[j];for(const sh of[0,WEEK,-WEEK])if(a[0]<b[1]+sh&&b[0]+sh<a[1])return true}
+  return false;
+}
+
+// ==================== SIMULATION ====================
+function depart(p,s,r,arr){const a=alloc(r).out.get(s);if(!a)return;S.pending.push({at:arr,rev:(a.legs?a.rev/a.legs:0)-legCost(model(p.modelId),r),pid:p.id})}
+function simulate(){
+  const t0=S.clock,t1=t0+STEP;S.clock=t1;
+  const w=Math.floor(t1/WEEK);S.routes.forEach(r=>{if(r.week<w)newWeek(r,w)});
+  S.planes.forEach(p=>p.sched.forEach(s=>{
+    const r=route(s.rid);if(!r)return;const f=fm(r.distance,model(p.modelId).speed);
+    for(let D=Math.floor(t0/1440)-2;D<=Math.floor(t1/1440);D++){if(!s.days[((D%7)+7)%7])continue;
+      [0,f+taOf(s)].forEach(o=>{const dep=D*1440+s.dep+o;if(dep>t0&&dep<=t1)depart(p,s,r,dep+f)})}
+  }));
+  S.pending=S.pending.filter(e=>{if(e.at<=t1){S.vault+=e.rev;S.totalRevenue+=e.rev;const p=plane(e.pid);if(p)p.totalEarned=(p.totalEarned||0)+e.rev;return false}return true});
+}
+
+// ---- custom dropdown (replaces native <select>)
+const DD={};
+function dd(id,opts,val,on){DD[id]={val:String(val),on,opts};const cur=opts.find(o=>String(o[0])===String(val))||opts[0];
+  return `<div class="dd" id="dd-${id}"><button type="button" class="ddb" onclick="ddToggle('${id}',event)"><span>${cur[1]}</span><i class="fi fi-rr-angle-small-down"></i></button><div class="ddl">${opts.map(o=>`<button type="button" data-v="${esc(o[0])}" class="${String(o[0])===String(val)?'on':''}" onclick="ddPick('${id}',this.dataset.v)">${o[1]}</button>`).join('')}</div></div>`}
+function ddClose(){document.querySelectorAll('.dd.open').forEach(x=>x.classList.remove('open'))}
+function ddToggle(id,e){e.stopPropagation();const el=document.getElementById('dd-'+id),open=!el.classList.contains('open');ddClose();if(!open)return;
+  const b=el.querySelector('.ddb').getBoundingClientRect(),l=el.querySelector('.ddl'),below=innerHeight-b.bottom-16,above=b.top-16,up=below<200&&above>below;
+  l.style.left=b.left+'px';l.style.width=b.width+'px';l.style.maxHeight=Math.min(280,up?above:below)+'px';
+  if(up){l.style.top='auto';l.style.bottom=(innerHeight-b.top+6)+'px'}else{l.style.bottom='auto';l.style.top=(b.bottom+6)+'px'}
+  el.classList.add('open')}
+function ddPick(id,v){const d=DD[id],el=document.getElementById('dd-'+id);d.val=v;ddClose();
+  el.querySelectorAll('.ddl button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  el.querySelector('.ddb span').innerHTML=(d.opts.find(o=>String(o[0])===v)||d.opts[0])[1];if(d.on)d.on(v)}
+document.addEventListener('click',ddClose);
+window.addEventListener('scroll',e=>{if(!(e.target.closest&&e.target.closest('.ddl')))ddClose()},true);
+window.addEventListener('resize',ddClose);
+
+// ==================== DIALOGS ====================
+function dlg(h){$('#dlg').innerHTML=h;$('#ov').classList.add('show')}
+function closeDlg(){$('#ov').classList.remove('show')}
+$('#ov').addEventListener('click',e=>{if(e.target.id==='ov')closeDlg()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDlg()});
+function confirmDlg(t,m,ok,fn,danger){dlg(`<h3>${t}</h3><p>${m}</p><div class="acts"><button class="btn" onclick="closeDlg()">Cancel</button><button class="btn ${danger?'d':'p'}" id="okb">${ok}</button></div>`);$('#okb').onclick=()=>{closeDlg();fn()}}
+function info(t,m){dlg(`<h3>${t}</h3><p>${m}</p><div class="acts"><button class="btn p" onclick="closeDlg()">OK</button></div>`)}
+
+// ==================== RENDER ====================
+const TABS=[['home','Home','fi-sr-home'],['fleet','Fleet','fi-sr-plane'],['owned','Airport','fi-sr-marker'],['buy','Buy','fi-sr-shopping-cart'],['vault','Vault','fi-sr-vault']];
+const seg=(key,items)=>`<div class="seg">${items.map(([v,l])=>`<button class="${UI[key]===v?'on':''}" onclick="setUI('${key}','${v}')">${l}</button>`).join('')}</div>`;
+const empty=t=>`<div class="empty"><i class="fi fi-rr-plane"></i>${t}</div>`;
+const back=(extra='',_t,toBuy)=>`<div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="${toBuy?(UI.page.mode==='refit'?'UI.page=null;render()':`setPage({t:'buy',mid:'${UI.page.mid}'})`):'setPage(null)'}">‹ Back</button>${extra}</div>`;
+function setUI(k,v){UI[k]=v;if(k==='buy'||k==='owned')UI.q='';render()}
+function go(t,k,v){UI.tab=t;UI.page=null;if(k)UI[k]=v;render()}
+function setPage(p){UI.page=p;render();scrollTo(0,0)}
+function head(){
+  $('#hName').textContent=S.airlineName;$('#hCash').textContent=fmt(S.cash);
+  $('#hStats').innerHTML=[['fi-rr-clock',clockStr(S.clock)],['fi-rr-plane',S.planes.length],['fi-sr-marker',ownedHubs().length],['fi-rr-route',S.routes.length]].map(([i,n])=>`<span><i class="fi ${i}"></i>${n}</span>`).join('');
+}
+function render(){
+  head();
+  $('#nav').innerHTML=TABS.map(([t,l,ic])=>`<button class="${UI.tab===t?'on':''}" onclick="go('${t}')" aria-label="${l}"><i class="fi ${ic}"></i>${l}</button>`).join('');
+  const pg=UI.page;if(pg&&((pg.t==='route'&&!route(pg.id))||(pg.t==='sched'&&!plane(pg.id))||(pg.t==='rot'&&!(plane(pg.pid)&&plane(pg.pid).sched[pg.i]))))UI.page=null;
+  const v=$('#view');
+  if(UI.page)v.innerHTML=({open:pageOpen,route:()=>pageRoute(UI.page.id),sched:()=>pageSched(UI.page.id),rot:pageRot,buy:pageBuy,cfg:pageCfg})[UI.page.t]();
+  else v.innerHTML={home:viewHome,fleet:viewFleet,owned:viewOwned,buy:viewBuy,vault:viewVault}[UI.tab]();
+  save();
+}
+
+// ---- Home
+function chart(){
+  const nw=S.history.nw,rv=S.history.rev;
+  if(nw.length<2)return empty('The chart fills in as your airline operates.');
+  const all=nw.concat(rv),lo=Math.min(...all),hi=Math.max(...all),W=300,H=120;
+  const pts=a=>a.map((v,i)=>`${(i/(a.length-1)*W).toFixed(1)},${(H-8-(v-lo)/((hi-lo)||1)*(H-16)).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:180px;display:block;color:var(--accent)" role="img" aria-label="Net worth and revenue"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><polygon points="0,${H} ${pts(nw)} ${W},${H}" fill="url(#g)"/><polyline points="${pts(rv)}" fill="none" stroke="#7f8794" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/><polyline points="${pts(nw)}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="row s" style="margin-top:8px"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>`;
+}
+function viewHome(){
+  const nw=S.cash+S.vault,d=nw-(S.history.nw[0]??nw);
+  return `<div class="card hero"><div class="s">Net worth</div><div class="big num">${fmt(nw)}</div><div class="s ${d>=0?'good':'bad'}">${d>=0?'+':'−'}${fmt(Math.abs(d))} this session</div></div>
+  <div class="card"><div class="row" style="margin-bottom:10px"><b>Finances</b><span class="s">━ Net worth &nbsp;╌ Revenue</span></div>${chart()}</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"><div class="card"><div class="s">Cash</div><b class="num">${fmt(S.cash)}</b></div><div class="card"><div class="s">Vault</div><b class="num">${fmt(S.vault)}</b></div><div class="card"><div class="s">Revenue</div><b class="num">${fmt(S.totalRevenue)}</b></div></div>`;
+}
+
+// ---- Fleet
+const MK=()=>MAKERS;
+function byMaker(fam){return Object.entries(MAKERS).map(([mk,keys])=>{const f=keys.filter(k=>fam[k]);if(!f.length)return '';return `<div class="mk"><span>${mk}</span><small>${f.reduce((n,k)=>n+fam[k].n,0)}</small></div>`+f.map(k=>fam[k].html).join('')}).join('')}
+function famGroup(key,title,meta,open,toggle,body){return `<div class="fam ${open?'open':''}"><div class="row" onclick="${toggle}('${key}')"><div style="display:flex;align-items:center"><span class="ic"><i class="fi fi-sr-plane"></i></span><div><div class="t">${title}</div><div class="s">${meta}</div></div></div><i class="fi fi-rr-angle-small-down chev"></i></div><div class="body">${body}</div></div>`}
+function toggleFam(k){UI.open[k]=!UI.open[k];render()}
+function viewFleet(){
+  if(!S.planes.length)return empty('No aircraft yet. Buy your first plane in the Buy tab.');
+  const by={};S.planes.forEach(p=>(by[model(p.modelId).family]??=[]).push(p));const fam={};
+  Object.keys(by).forEach(k=>fam[k]={n:by[k].length,html:famGroup(k,FAMILIES[k]+' Family',`${by[k].length} aircraft · ${by[k].filter(p=>p.sched.length).length} scheduled`,UI.open[k],'toggleFam',by[k].map(planeCard).join(''))});
+  return byMaker(fam);
+}
+function planeCard(p){
+  const m=model(p.modelId),h=weekHours(p),c=cfgOf(p);
+  return `<div class="card"><div class="row"><div><span class="tag">${p.reg}</span> <span class="t">${m.name}</span> <span class="tag">${m.icao}</span><div class="s">${cfgStr(c)} · ${m.range} km · based ${hub(p.hubId).code}</div></div><span class="pill ${h?'on':''}">${h?Math.round(h)+'h/wk':'Idle'}</span></div>
+  ${h?`<div class="row s" style="margin-top:8px"><span>${p.sched.length} rotation${p.sched.length>1?'s':''}</span><span class="good">~${fmt(weekProfit(p))}/week</span></div>`:''}
+  <div class="acts"><button class="btn sm" onclick="setPage({t:'sched',id:${p.id}})">Schedule</button><button class="btn sm" onclick="refitOpen(${p.id})">Config</button><button class="btn sm d" onclick="sellPlane(${p.id})">Sell ${fmt(m.price*SELL_RATE)}</button></div></div>`;
+}
+function sellPlane(id){const p=plane(id),m=model(p.modelId),v=Math.round(m.price*SELL_RATE);confirmDlg('Sell aircraft?',`Sell ${p.reg} (${m.name}) for ${fmt(v)}? Its schedule will be removed.`,'Sell',()=>{S.planes=S.planes.filter(x=>x.id!==id);S.cash+=v;render()},true)}
+
+// ---- Owned
+function airportShop(kind){
+  UI.buy=kind;setTimeout(()=>{const i=$('#bq2');if(i)i.oninput=e=>{UI.q=e.target.value;$('#bl').innerHTML=buyList()}});
+  return `<h2>${kind==='hubs'?'Buy a hub':'Buy gates'}</h2><input type="text" id="bq2" placeholder="Search airports or ICAO" value="${esc(UI.q)}" style="margin-bottom:12px"><div id="bl">${buyList()}</div>`;
+}
+function viewOwned(){
+  const h0=seg('owned',[['routes','Routes'],['hubs','Hubs'],['gates','Gates']]);
+  if(UI.owned==='routes')return h0+`<button class="btn p" style="width:100%;margin-bottom:10px;padding:11px" onclick="openPage()">＋ Open route</button>`+(S.routes.length?S.routes.map(routeCard).join(''):empty('No routes yet. Open one from a hub.'));
+  if(UI.owned==='hubs')return h0+ownedHubs().map(id=>{const h=hub(id);return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${h.country} · Demand ${dem(h)}</div></div><div class="s" style="text-align:right">${S.routes.filter(r=>r.from===id).length} routes<br>${S.planes.filter(p=>p.hubId===id).length} planes</div></div>`}).join('')+airportShop('hubs');
+  const ids=Object.keys(S.gates).filter(id=>S.gates[id]>0);
+  if(!ids.length)return h0+empty('No gates yet. You buy gates when you open a route.');
+  return h0+ids.map(id=>{const h=hub(id),n=S.gates[id],rs=S.routes.filter(r=>r.to===id);let rows='';
+    for(let i=0;i<n;i++){const r=rs[i];rows+=r?`<div class="gate occ" style="cursor:pointer" onclick="setPage({t:'route',id:${r.id}})"><div><span class="gn">${i+1}</span><span class="tag">${flightNos(r)[0]}</span> <span class="s">${hub(r.from).code} ⇄ ${h.code}</span></div><i class="fi fi-rr-angle-small-down chev" style="transform:rotate(-90deg)"></i></div>`:`<div class="gate"><div><span class="gn">${i+1}</span><span class="s">Free</span></div></div>`}
+    return `<div class="card"><div class="row"><div class="t">${hubName(h)}</div><span class="pill">${rs.length}/${n} used</span></div><div style="margin-top:8px">${rows}</div></div>`}).join('');
+}
+function routeCard(r){
+  const f=hub(r.from),t=hub(r.to),a=sumD(alloc(r).rem),T=sumD(r.demand),L=legsWeek(r);
+  return `<div class="card" style="cursor:pointer" onclick="setPage({t:'route',id:${r.id}})"><div class="rl"><div><b>${f.code}</b><span>${esc(f.city)}</span></div><div class="ln"></div><div style="text-align:right"><b>${t.code}</b><span>${esc(t.city)}</span></div></div>
+  <div class="row s" style="margin-top:10px"><span><span class="tag">${flightNos(r)[0]}</span> ${fmtN(r.distance)} km</span><span>${L/2} flights/week · ${S.planes.filter(p=>p.sched.some(s=>s.rid===r.id)).length} aircraft</span></div>
+  <div class="row s" style="margin-top:6px"><span>Demand left</span><span class="num">${fmtN(a)} / ${fmtN(T)}</span></div><div class="bar"><i style="width:${T?a/T*100:0}%"></i></div></div>`;
+}
+
+// ---- Open route page
+function openPage(){if(!ownedHubs().length)return info('No hub yet','Buy a hub first (Airport → Hubs).');UI.rangeHub=ownedHubs().includes(UI.rangeHub)?UI.rangeHub:ownedHubs()[0];setPage({t:'open'})}
+const SORTS=[['dem_desc','Highest demand'],['dem_asc','Lowest demand'],['dist_desc','Farthest'],['dist_asc','Shortest'],['rot_desc','Most rotations'],['rot_asc','Fewest rotations']];
+function refAc(){const p=UI.openAc?plane(+UI.openAc):null;return p&&p.hubId===UI.rangeHub?p:null}
+function openList(){
+  const from=UI.rangeHub,ac=refAc(),m=ac?model(ac.modelId):null,km=m?m.range:UI.rangeKm,spd=m?m.speed:850,[k,dir]=UI.openSort.split('_'),key={dem:x=>x.w,dist:x=>x.d,rot:x=>x.rot};
+  const list=HUBS.filter(h=>h.id!==from&&!S.routes.some(r=>r.from===from&&r.to===h.id)).map(h=>{const d=dist(from,h.id);return{h,d,w:routeM(from,h.id,d)/4.345,rot:1440/(2*fm(d,spd)+TURN)}}).filter(x=>x.d<=km).sort((a,b)=>dir==='asc'?key[k](a)-key[k](b):key[k](b)-key[k](a));
+  const rows=list.slice(0,40).map(({h,d,w,rot})=>{const g=gateUsed(h.id)>=gateCount(h.id),c=openCost(from,h.id,d)+(g?h.gatePrice:0);
+    return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · ${fmtN(d)} km · ${rot.toFixed(1)} rot/day · ~${fmtN(w)} pax/wk</div></div><button class="btn sm p" onclick="confirmOpen('${from}','${h.id}')" ${S.cash<c?'disabled':''}>${fmt(c)}${g?'<span style="font-weight:400"> +gate</span>':''}</button></div>`}).join('');
+  return `<div class="s" style="margin:0 2px 8px">${list.length} destinations${ac?' for '+ac.reg:''}${list.length>40?' · top 40 shown':''}</div>`+(rows||empty('No destinations match.'));
+}
+function pageOpen(){
+  const hubs=ownedHubs(),ac=refAc(),acs=S.planes.filter(p=>p.hubId===UI.rangeHub),rg=ac?model(ac.modelId).range:UI.rangeKm;
+  return back('<b>Open route</b>')+(hubs.length>1?`<div style="margin-bottom:10px">${dd('oh',hubs.map(i=>[i,`${hub(i).flag} ${esc(hub(i).city)} (${hub(i).code} · ${hub(i).icao})`]),UI.rangeHub,v=>{UI.rangeHub=v;UI.openAc='';render()})}</div>`:`<div class="card row"><div class="t">${hubName(hub(UI.rangeHub))}</div><span class="pill">Hub</span></div>`)+
+  `<div class="card"><div class="s" style="margin-bottom:4px">Aircraft reference</div>${dd('oa',[['','None · use range slider'],...acs.map(p=>[p.id,`${p.reg} · ${esc(model(p.modelId).name)} · ${fmtN(model(p.modelId).range)} km`])],ac?ac.id:'',v=>{UI.openAc=v;render()})}
+  <div class="row" style="margin-top:12px"><span class="s">Range${ac?' (from aircraft)':''}</span><b class="num" id="rk">${fmtN(rg)} km</b></div><input type="range" min="500" max="16000" step="100" value="${rg}" oninput="setRange(this.value)" ${ac?'disabled':''} aria-label="Range in km">
+  <div class="s" style="margin:10px 0 4px">Sort by</div>${dd('os',SORTS,UI.openSort,v=>{UI.openSort=v;$('#rl').innerHTML=openList()})}</div><div id="rl">${openList()}</div>`;
+}
+function setRange(v,redraw){UI.rangeKm=+v;if(redraw)return render();$('#rk').textContent=fmtN(UI.rangeKm)+' km';$('#rl').innerHTML=openList()}
+function confirmOpen(from,to){
+  const f=hub(from),t=hub(to),d=dist(from,to),rc=openCost(from,to,d),free=gateCount(to)-gateUsed(to),min=free>0?0:1,max=MAX_GATES-gateCount(to);
+  if(max<min)return info('No gate available',`All ${MAX_GATES} gates at ${t.code} are used by other routes.`);
+  let q=min;
+  dlg(`<h3>Open route</h3><p style="margin-bottom:10px">${f.code} ⇄ ${t.code} · ${fmtN(d)} km</p>
+  <div class="row"><span class="s">Route fee</span><b class="num">${fmt(rc)}</b></div>
+  <div class="card" style="margin:12px 0"><div class="row"><div><div class="t">Gates at ${t.code}</div><div class="s">${gateCount(to)}/${MAX_GATES} owned · ${free} free · ${fmt(t.gatePrice)} each</div></div>${max>0?`<div class="step"><button class="btn sm" id="gm">−</button><b id="gq">${q}</b><button class="btn sm" id="gp">+</button></div>`:`<span class="pill">Max</span>`}</div>${min?'<div class="s" style="margin-top:8px">This route needs a gate, so at least 1 is required.</div>':'<div class="s" style="margin-top:8px">A free gate will be used. Buy more only if you plan extra routes.</div>'}</div>
+  <div class="row"><span class="s">Total</span><b class="num" id="ot"></b></div>
+  <div class="acts"><button class="btn" onclick="closeDlg()">Cancel</button><button class="btn p" id="ook">Open route</button></div>`);
+  const paint=()=>{if($('#gq'))$('#gq').textContent=q;$('#ot').textContent=fmt(rc+q*t.gatePrice)};
+  paint();
+  if(max>0){$('#gm').onclick=()=>{q=Math.max(min,q-1);paint()};$('#gp').onclick=()=>{q=Math.min(max,q+1);paint()}}
+  $('#ook').onclick=()=>{
+    const total=rc+q*t.gatePrice;if(S.cash<total){closeDlg();return info('Insufficient funds',`You need ${fmt(total-S.cash)} more.`)}
+    closeDlg();S.cash-=total;S.gates[to]=gateCount(to)+q;
+    const r={id:S.nextRouteId++,from,to,distance:d,fares:defFares(d)};newWeek(r,Math.floor(S.clock/WEEK));S.routes.push(r);setPage({t:'route',id:r.id});
+  };
+}
+// ---- Route page
+const fareBox=r=>{const f=fareOf(r);return `<div class="fg">${[['Y','Economy'],['W','Premium'],['C','Business'],['F','First']].map(([k,l])=>`<label><span class="s">${l}</span><input type="number" min="1" value="${f[k]}" onchange="setFare(${r.id},'${k}',this.value)" aria-label="${l} fare"><small class="s">load ~${Math.round(lfk(r,k)*100)}%</small></label>`).join('')}</div>`};
+function setFare(id,k,v){const r=route(id);if(!r)return;if(k==='*')r.fares=defFares(r.distance);else{const b=baseTicket(r.distance)*FR[k];fareOf(r)[k]=Math.max(Math.round(b*.5),Math.min(Math.round(b*2.2),Math.round(+v)||Math.round(b)))}save();render()}
+function pageRoute(id){
+  const r=route(id),f=hub(r.from),t=hub(r.to),[n1,n2]=flightNos(r),L=legsWeek(r),A=alloc(r).rem;
+  const bars=[['Y','Economy'],['W','Premium eco.'],['C','Business']].map(([k,l])=>`<div style="margin-top:10px"><div class="row"><span class="s">${l} · left</span><span class="num s"><b style="color:var(--ink)">${fmtN(A[k])}</b> / ${fmtN(r.demand[k])}</span></div><div class="bar"><i style="width:${r.demand[k]?A[k]/r.demand[k]*100:0}%"></i></div></div>`).join('');
+  const ps=S.planes.filter(p=>p.sched.some(s=>s.rid===id));
+  return back(`<b>${n1} / ${n2}</b>`)+`<div class="card"><div class="rl"><div><b>${f.code}</b><span>${esc(f.city)}</span></div><div class="ln"></div><div style="text-align:right"><b>${t.code}</b><span>${esc(t.city)}</span></div></div><div class="row s" style="margin-top:10px"><span>${fmtN(r.distance)} km · ${t.icao}</span><span>${L/2} flights/week</span></div></div>
+  <div class="card"><div class="row"><b>Weekly demand</b><span class="s">wk ${r.week+1}</span></div>${bars}${capLine(r)}</div>
+  <div class="card"><div class="row"><b>Fares</b><button class="btn sm" onclick="setFare(${id},'*')">Suggested</button></div><div style="margin-top:10px">${fareBox(r)}</div></div>
+  <h2>Aircraft</h2>${ps.map(p=>{const s=p.sched.filter(x=>x.rid===id);return `<div class="card row"><div><span class="tag">${p.reg}</span> <span class="t">${model(p.modelId).name}</span><div class="s">${s.reduce((a,x)=>a+dayCount(x)*2,0)} flights/week</div></div><button class="btn sm" onclick="setPage({t:'sched',id:${p.id}})">Schedule</button></div>`}).join('')||`<div class="s" style="margin:0 2px 8px">No aircraft assigned.</div>`}
+  <div class="acts"><button class="btn p" onclick="assignDlg(${id})">Assign aircraft</button><button class="btn d" onclick="closeRoute(${id})">Close route</button></div>`;
+}
+function closeRoute(id){confirmDlg('Close route?','All schedules on this route will be removed. The gate becomes free.','Close route',()=>{S.routes=S.routes.filter(r=>r.id!==id);S.planes.forEach(p=>p.sched=p.sched.filter(s=>s.rid!==id));UI.page=null;render()},true)}
+function assignDlg(rid){
+  const r=route(rid),ok=S.planes.filter(p=>p.hubId===r.from);
+  if(!ok.length)return info('No aircraft','You have no aircraft based at '+hub(r.from).code+'.');
+  dlg(`<h3>Assign aircraft</h3><p style="margin-bottom:10px">${hub(r.from).code} ⇄ ${hub(r.to).code} · ${fmtN(r.distance)} km</p><div id="pl"></div><div class="acts"><button class="btn" onclick="closeDlg()">Cancel</button></div>`);
+  ok.forEach(p=>{const m=model(p.modelId),inr=m.range>=r.distance,b=document.createElement('button');b.className='btn pick';b.disabled=!inr;
+    b.innerHTML=`<span class="tag">${p.reg}</span> ${m.name} <span class="tag">${m.icao}</span><div class="s" style="font-weight:400">${inr?`${Math.round(weekHours(p))}h/week used · ${dur(fm(r.distance,m.speed))} each way · est. ${(v=>`<b class="${v>=0?'good':'bad'}">${fmt(v)}/wk</b>`)(estAdd(p,r))}`:`Range ${fmtN(m.range)} km is too short`}</div>`;
+    b.onclick=()=>{closeDlg();if(!addRot(p,rid,false))info('No free time','This aircraft has no free slot for another rotation.');else setPage({t:'rot',pid:p.id,i:p.sched.length-1})};$('#pl').appendChild(b)});
+}
+
+// ---- Schedule
+const rotNos=(s,r)=>{const o=s.fn||flightNos(r)[0];return[o,/\d+$/.test(o)?o.replace(/\d+$/,x=>String(+x+1)):o+'B']};
+const dayTxt=s=>s.days.every(Boolean)?'Daily':DAYS.filter((d,k)=>s.days[k]).join(' ')||'No days';
+function bookedPct(p,s){const r=route(s.rid),a=alloc(r).out.get(s);return a?Math.round(Object.values(a.pax).reduce((x,y)=>x+y,0)/Math.max(1,seatsOf(cfgOf(p)))*100):0}
+function addRot(p,rid,fill,dep0){
+  const r=route(rid);if(!r||model(p.modelId).range<r.distance||p.hubId!==r.from)return false;let added=0;
+  const tryAt=d=>{const s={rid,dep:d,days:[1,1,1,1,1,1,1].map(Boolean),seq:S.seq=(S.seq||0)+1};if(hasConflict(p,p.sched.concat([s])))return false;p.sched.push(s);added++;return true};
+  if(dep0!=null&&!fill)return tryAt(dep0);
+  const len=2*fm(r.distance,model(p.modelId).speed)+TURN;
+  for(let d=dep0!=null?dep0:300;d+len<=1440+240;d+=5){if(tryAt(d)){if(!fill)break;d+=len+55}}
+  return added>0;
+}
+function addDlg(pid){
+  const p=plane(pid),m=model(p.modelId),rs=S.routes.filter(r=>r.from===p.hubId&&r.distance<=m.range);
+  if(!rs.length)return info('No routes','Open a route from '+hub(p.hubId).code+' within '+fmtN(m.range)+' km first.');
+  dlg(`<h3>Add rotation</h3><p style="margin-bottom:10px">Round trip from ${hub(p.hubId).code}. Set the time and turnaround in the editor.</p>${dd('ar',rs.map(r=>[r.id,`${flightNos(r)[0]} · ${hub(r.from).code} ⇄ ${hub(r.to).code} · ${fmtN(r.distance)} km`]),rs[0].id)}<div class="acts"><button class="btn" id="a1">Add one</button><button class="btn p" id="a2">Fill the day</button></div>`);
+  $('#a1').onclick=()=>{const ok=addRot(p,+DD.ar.val,false);closeDlg();if(!ok)info('No free time','No free slot for another rotation.');else setPage({t:'rot',pid,i:p.sched.length-1})};
+  $('#a2').onclick=()=>{const ok=addRot(p,+DD.ar.val,true);closeDlg();if(!ok)info('No free time','No free slot for another rotation.');else render()};
+}
+function rmRot(pid,i){plane(pid).sched.splice(i,1);render()}
+function weekSegs(p){
+  const m=model(p.modelId),cols=[[],[],[],[],[],[],[]];
+  p.sched.forEach((s,i)=>{const r=route(s.rid);if(!r)return;const f=fm(r.distance,m.speed),t2=s.dep+f+taOf(s),a=hub(r.from).code,b=hub(r.to).code;
+    const parts=[[s.dep,s.dep+f,'out',a+'›'+b,hhmm(s.dep)],[s.dep+f,t2,'turn','',''],[t2,t2+f,'ret',b+'›'+a,hhmm(t2)]];
+    s.days.forEach((on,D)=>{if(!on)return;parts.forEach(([x,y,kind,lab,t])=>{const add=(d,x0,y0)=>cols[d%7].push({x:x0,y:y0,kind,lab,t,id:r.id,i});
+      if(x>=1440)add(D+1,x-1440,y-1440);else if(y>1440){add(D,x,1440);add(D+1,0,y-1440)}else add(D,x,y)})})});
+  return cols;
+}
+const hue=id=>(id*67+20)%360,rcol=id=>`hsl(${hue(id)} 52% 40%)`;
+function pageSched(pid){
+  const p=plane(pid),m=model(p.modelId),cols=weekSegs(p),today=Math.floor(S.clock/1440)%7;
+  const hrs=[0,2,4,6,8,10,12,14,16,18,20,22].map(h=>`<span style="top:${h/24*100}%">${pad(h)}</span>`).join('');
+  const rots=p.sched.map((s,i)=>{const r=route(s.rid),f=fm(r.distance,m.speed),ta=taOf(s),t2=s.dep+f+ta,c=`--c:${rcol(r.id)}`,pc=v=>(v/1440*100)+'%',[n1,n2]=rotNos(s,r);
+    return `<div class="card"><div class="row"><div><span class="tag">${n1} / ${n2}</span> <span class="t">${hub(r.from).code} ⇄ ${hub(r.to).code}</span><div class="s">${hhmm(s.dep)} → ${hhmm(s.dep+f)} · back ${hhmm(t2)} → ${hhmm(t2+f)} · TA ${ta} min · ${dayTxt(s)} · <b class="${rotProfit(p,s)>=0?'good':'bad'}">${fmt(rotProfit(p,s))}/wk</b></div></div><div style="display:flex;gap:6px;flex:none"><button class="btn sm" onclick="setPage({t:'rot',pid:${pid},i:${i}})">Edit</button><button class="btn sm d" onclick="rmRot(${pid},${i})">Remove</button></div></div>
+    <div class="tl" style="${c}"><i style="left:${pc(s.dep)};width:${pc(f)}"></i><i class="turn" style="left:${pc(s.dep+f)};width:${pc(ta)}"></i><i class="ret" style="left:${pc(t2)};width:${pc(f)}"></i></div><div class="tlh"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div></div>`}).join('');
+  return back(`<div style="text-align:right"><span class="tag">${p.reg}</span> <b>${m.name}</b> <span class="tag">${m.icao}</span></div>`)+
+  `<div class="card"><div class="tiles" style="margin-top:0"><div><span class="s">Range</span><b class="num">${fmtN(m.range)} km</b></div><div><span class="s">Weekly ops</span><b class="num">${Math.round(weekHours(p))} h</b></div><div><span class="s">Weekly profit</span><b class="num ${weekProfit(p)>=0?'good':'bad'}">${fmt(weekProfit(p))}</b></div></div></div>
+  <div class="acts" style="margin:0 0 10px"><button class="btn p" onclick="addDlg(${pid})">＋ Add rotation</button></div>${rots||empty('No rotations yet. Add one or assign this aircraft from a route.')}
+  <h2>Weekly schedule</h2><div class="lg"><span><i></i>Outbound</span><span><i class="t"></i>Turnaround</span><span><i class="r"></i>Return</span></div>
+  <div class="sgh"><span></span>${DAYS.map((d,k)=>`<span class="${k===today?'today':''}">${d}</span>`).join('')}</div>
+  <div class="sg"><div class="hr">${hrs}</div>${cols.map((c,D)=>`<div class="col">${c.map(b=>`<div class="blk ${b.kind}" style="--c:${rcol(b.id)};top:${b.x/14.4}%;height:${(b.y-b.x)/14.4}%"><span>${b.lab}</span><small>${b.t}</small></div>`).join('')}${D===today?`<div class="now" style="top:${(S.clock%1440)/14.4}%"></div>`:''}</div>`).join('')}</div>`;
+}
+// ---- flight editor (custom time picker, turnaround, draggable week)
+function wkHTML(p,cur){
+  const cols=weekSegs(p);
+  return `<div class="r"><span class="lab"></span><div class="hh">${[0,6,12,18,24].map(h=>`<span style="left:${h/24*100}%">${pad(h)}:00</span>`).join('')}</div></div>`+cols.map((c,D)=>`<div class="r"><span class="lab">${DAYS[D]}</span><div class="trk">${c.map(b=>`<i class="b ${b.i===cur?'c':'g'} ${b.kind[0]}" ${b.i===cur?'':`data-i="${b.i}"`} style="left:${b.x/14.4}%;width:${(b.y-b.x)/14.4}%"></i>`).join('')}</div></div>`).join('');
+}
+function legsHTML(p,s){
+  const r=route(s.rid),f=fm(r.distance,model(p.modelId).speed),ta=taOf(s),t2=s.dep+f+ta,a=hub(r.from).code,b=hub(r.to).code,nx=v=>v>=1440?' (+'+Math.floor(v/1440)+')':'';
+  return `<div class="row" style="margin-top:12px"><b style="color:#2f6fe8">${a}→${b}</b><span class="num">${hhmm(s.dep)}–${hhmm(s.dep+f)}${nx(s.dep+f)}</span></div><div class="row" style="margin-top:4px"><b style="color:#2f6fe8">${b}→${a}</b><span class="num">${hhmm(t2)}–${hhmm(t2+f)}${nx(t2+f)}</span></div><div class="s" style="margin-top:8px">${dur(f)} each way · ${ta} min turnaround · back at base ${hhmm(t2+f)}</div>`;
+}
+function pageRot(){
+  const pg=UI.page,p=plane(pg.pid),s=p.sched[pg.i],r=route(s.rid),m=model(p.modelId),f=fm(r.distance,m.speed),ta=taOf(s),both=UI.rotMode!=='ret',[n1,n2]=rotNos(s,r),cur=both?s.dep:(s.dep+f+ta)%1440;
+  setTimeout(bindWk);
+  return `<div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="UI.rotErr='';setPage({t:'sched',id:${p.id}})">‹ Schedule</button><span class="s">Round trip with <b style="color:var(--ink)">${n1}</b></span></div>
+  <div class="seg"><button class="${both?'on':''}" onclick="UI.rotMode='both';render()">Move both</button><button class="${both?'':'on'}" onclick="UI.rotMode='ret';render()">Only ${n2}</button></div>
+  <div class="card"><b>${both?'Departure time':'Return departure'}</b><div class="s">${p.reg}: ${bookedPct(p,s)}% booked, ${(weekHours(p)/7).toFixed(1)} h a day · <b class="${rotProfit(p,s)>=0?'good':'bad'}">${fmt(rotProfit(p,s))}/wk</b></div>
+   <div class="tp"><button class="btn sm" onclick="rotShift(-60)">−1h</button><button class="btn sm" onclick="rotShift(-5)">−5m</button><div class="tpv"><input type="number" id="tph" min="0" max="23" value="${pad(Math.floor(cur/60))}" onchange="rotSet()" aria-label="Hour"><b>:</b><input type="number" id="tpm" min="0" max="59" value="${pad(cur%60)}" onchange="rotSet()" aria-label="Minute"></div><button class="btn sm" onclick="rotShift(5)">+5m</button><button class="btn sm" onclick="rotShift(60)">+1h</button></div>
+   <div id="legs">${legsHTML(p,s)}</div>
+   <div class="row" style="margin-top:14px"><div><div class="t">Turnaround time</div><div class="s">Time on the ground at ${hub(r.to).code}</div></div><div class="step"><button class="btn sm" onclick="taShift(-15)">−15</button><button class="btn sm" onclick="taShift(-5)">−5</button><b style="min-width:62px">${ta} min</b><button class="btn sm" onclick="taShift(5)">+5</button><button class="btn sm" onclick="taShift(15)">+15</button></div></div>
+   <div class="wk" id="wkv">${wkHTML(p,pg.i)}</div><div class="s" style="margin-top:6px">Drag across the week or type a time. Tap a grey flight to edit it.</div>${UI.rotErr?`<div class="err">${UI.rotErr}</div>`:''}</div>
+  <div class="card"><div class="row" style="align-items:flex-start;gap:16px"><div style="flex:1"><div class="s">Flight number</div><input type="text" maxlength="8" value="${esc(n1)}" onchange="rotFn(this.value)" style="margin-top:4px" aria-label="Flight number"><div class="s" style="margin-top:12px">Days</div><div class="dys">${DAYS.map((d,k)=>`<button class="dy ${s.days[k]?'on':''}" onclick="rotDay(${k})" aria-label="${d}">${d[0]}</button>`).join('')}</div></div></div>
+   <div class="s" style="margin:16px 0 8px">Fares · shared by the whole route</div>${fareBox(r)}</div>
+  <div class="row" style="margin-top:6px"><button class="btn d" onclick="rotDel()">Delete ${n1} and ${n2}</button><button class="btn p" onclick="UI.rotErr='';setPage({t:'sched',id:${p.id}})">Save both</button></div>`;
+}
+function rotApply(fn){const p=plane(UI.page.pid),s=p.sched[UI.page.i],bak={dep:s.dep,ta:s.ta,days:s.days.slice()};fn(s,p);if(hasConflict(p,p.sched)){Object.assign(s,bak);UI.rotErr='That overlaps another rotation of this aircraft.'}else UI.rotErr='';render()}
+const rotF=(s,p)=>fm(route(s.rid).distance,model(p.modelId).speed);
+function rotShift(d){rotApply((s,p)=>{if(UI.rotMode==='ret')s.ta=Math.max(TA_MIN,taOf(s)+d);else s.dep=(s.dep+d+1440)%1440})}
+function rotSet(){const v=((+$('#tph').value||0)%24)*60+((+$('#tpm').value||0)%60);rotApply((s,p)=>{if(UI.rotMode==='ret')s.ta=Math.max(TA_MIN,((v-s.dep-rotF(s,p))%1440+1440)%1440);else s.dep=v})}
+function taShift(d){rotApply(s=>{s.ta=Math.max(TA_MIN,Math.min(720,taOf(s)+d))})}
+function rotDay(k){rotApply(s=>{s.days[k]=!s.days[k]})}
+function rotFn(v){const s=plane(UI.page.pid).sched[UI.page.i];v=v.trim().toUpperCase().slice(0,8);if(v)s.fn=v;else delete s.fn;render()}
+function rotDel(){const pid=UI.page.pid;plane(pid).sched.splice(UI.page.i,1);UI.rotErr='';setPage({t:'sched',id:pid})}
+function dragTo(v){
+  const pg=UI.page,p=plane(pg.pid),s=p.sched[pg.i],bak={dep:s.dep,ta:s.ta};
+  if(UI.rotMode==='ret')s.ta=Math.max(TA_MIN,((v-s.dep-rotF(s,p))%1440+1440)%1440);else s.dep=v;
+  if(hasConflict(p,p.sched)){s.dep=bak.dep;s.ta=bak.ta;return}
+  const cur=UI.rotMode==='ret'?(s.dep+rotF(s,p)+taOf(s))%1440:s.dep;
+  $('#wkv').innerHTML=wkHTML(p,pg.i);$('#legs').innerHTML=legsHTML(p,s);$('#tph').value=pad(Math.floor(cur/60));$('#tpm').value=pad(cur%60);
+}
+function bindWk(){
+  const w=$('#wkv');if(!w||!w.setPointerCapture)return;let drag=false;
+  const at=e=>{const t=w.querySelector('.trk').getBoundingClientRect();return Math.max(0,Math.min(1435,Math.round((e.clientX-t.left)/t.width*1440/5)*5))};
+  w.onpointerdown=e=>{const g=e.target.closest('[data-i]');if(g){UI.page.i=+g.dataset.i;return render()}drag=true;w.setPointerCapture(e.pointerId);dragTo(at(e))};
+  w.onpointermove=e=>{if(drag)dragTo(at(e))};
+  w.onpointerup=w.onpointercancel=()=>{if(drag){drag=false;render()}};
+}
+
+// ---- Buy
+function viewBuy(){return viewMarket()}
+function setMaker(m){UI.maker=m;render()}
+function toggleM(k){UI.openM[k]=!UI.openM[k];render()}
+function openBuy(id){UI.buyQ=1;setPage({t:'buy',mid:id})}
+function viewMarket(){
+  const mks=Object.keys(MAKERS);if(!mks.includes(UI.maker))UI.maker=mks[0];
+  setTimeout(()=>{const e=document.querySelector('.mt .on');if(e&&e.scrollIntoView)e.scrollIntoView({inline:'center',block:'nearest'})});
+  const tabs=`<div class="mt">${mks.map(m=>`<button class="${m===UI.maker?'on':''}" onclick="setMaker('${m}')">${m}</button>`).join('')}</div>`;
+  const by={};AIRCRAFT.filter(a=>MAKERS[UI.maker].includes(a.family)).forEach(a=>(by[a.family]??=[]).push(a));
+  return tabs+Object.keys(by).map(k=>famGroup(k,FAMILIES[k]+' Family',`${by[k].length} variant${by[k].length>1?'s':''}`,UI.openM[k],'toggleM',by[k].map(a=>`<div class="card" style="cursor:pointer" onclick="openBuy('${a.id}')"><div class="row"><div class="t">${a.name} <span class="tag">${a.icao}</span></div><i class="fi fi-rr-angle-small-down chev" style="transform:rotate(-90deg)"></i></div><div class="row s" style="margin-top:8px"><span>Range <b class="num" style="color:var(--ink)">${fmtN(a.range)} km</b></span><span>Max seats <b class="num" style="color:var(--ink)">${a.seats}</b></span><span>Price <b class="num" style="color:var(--ink)">${fmt(a.price)}</b></span></div></div>`).join(''))).join('');
+}
+const draft=mid=>UI.drafts[mid]??=defaultCfg(model(mid));
+const curCfg=()=>UI.page.mode==='refit'?UI.refit:draft(UI.page.mid);
+function setCfg(c){if(UI.page.mode==='refit')UI.refit=c;else UI.drafts[UI.page.mid]=c}
+const unitCost=mid=>model(mid).price+cfgCost(draft(mid));
+function buyBtn(){const mid=UI.page.mid,m=model(mid);return `Purchase ${UI.buyQ}× ${m.icao} · ${fmt(unitCost(mid)*UI.buyQ)}`}
+function pageBuy(){
+  const mid=UI.page.mid,m=model(mid),c=draft(mid),hubs=ownedHubs(),mk=Object.keys(MAKERS).find(k=>MAKERS[k].includes(m.family));
+  const sum=KEYS.filter(k=>c[k].n).map(k=>`<div class="card row"><div><div class="s">${CNAME[k].toUpperCase()}</div><div class="t">${PROD[k][c[k].p][0]} <span class="s">· ${c[k].n} seats</span></div></div><span class="pill">${rate(k,c[k])}%</span></div>`).join('');
+  return back(`<span class="tag">${m.icao}</span>`)+`<div class="card hero"><div class="t" style="font-size:20px">${m.name}</div><div class="s">${mk} · ${FAMILIES[m.family]} Family</div><div class="tiles"><div><span class="s">Range</span><b class="num">${fmtN(m.range)} km</b></div><div><span class="s">Max seats</span><b class="num">${m.seats}</b></div><div><span class="s">Price</span><b class="num">${fmt(m.price)}</b></div></div></div>
+  <div class="row" style="margin:18px 2px 8px"><b>Seat configuration</b><span class="s">${seatsOf(c)} seats${c.name?' · '+esc(c.name):''} · +${fmt(cfgCost(c))}</span></div>
+  <div class="acts" style="margin:0 0 10px"><button class="btn" onclick="loadDlg('${mid}')">Load config</button><button class="btn" onclick="setPage({t:'cfg',mid:'${mid}',mode:'buy'})">Edit config</button></div>${sum}
+  <h2>Delivery</h2>`+(hubs.length?`${dd('bh',hubs.map(i=>[i,`${hub(i).flag} ${esc(hub(i).city)} (${hub(i).code})`]),UI.buyHub||hubs[0],v=>{UI.buyHub=v})}
+  <div class="row" style="margin:12px 0"><span class="s">Quantity</span><div class="step"><button class="btn sm" onclick="setQ(-1)">−</button><b id="bq">${UI.buyQ}</b><button class="btn sm" onclick="setQ(1)">+</button></div></div>
+  <button class="btn p" id="bbtn" style="width:100%;padding:13px" onclick="doBuy('${mid}')">${buyBtn()}</button>`:`<div class="card row"><div class="s">You need a hub to base aircraft.</div><button class="btn sm p" onclick="go('owned','owned','hubs')">Buy hub</button></div>`);
+}
+function setQ(d){const mid=UI.page.mid,max=Math.max(1,Math.min(50,Math.floor(S.cash/unitCost(mid))));UI.buyQ=Math.max(1,Math.min(max,UI.buyQ+d));$('#bq').textContent=UI.buyQ;$('#bbtn').textContent=buyBtn()}
+function doBuy(mid){
+  const m=model(mid),c=draft(mid),q=UI.buyQ,u=unitCost(mid),h=DD.bh?DD.bh.val:ownedHubs()[0];UI.buyHub=h;
+  if(S.cash<u*q)return info('Insufficient funds',`You need ${fmt(u*q-S.cash)} more.`);
+  S.cash-=u*q;for(let i=0;i<q;i++)S.planes.push({id:S.nextPlaneId++,reg:newReg(),modelId:mid,hubId:h,sched:[],totalEarned:0,cfg:clone(c)});
+  UI.tab='fleet';UI.page=null;render();
+}
+function pageCfg(){
+  const g=UI.page,m=model(g.mid),c=curCfg(),used=usedSpace(c),refit=g.mode==='refit';
+  const cls=KEYS.map(k=>{const p=c[k],pr=PROD[k],lim=k==='Y'?[26,34]:[34,42];
+    return `<div class="card"><div class="row"><div><div class="s">${CNAME[k].toUpperCase()}</div><div class="t">${pr[p.p][0]} <span class="s">· ${p.n} seats</span></div></div><span class="pill">${rate(k,p)}%</span></div>
+    <div class="row" style="margin-top:10px"><span class="s">Seats</span><div class="step"><button class="btn sm" onclick="cfgN('${k}',-10)">−10</button><button class="btn sm" onclick="cfgN('${k}',-1)">−</button><b>${p.n}</b><button class="btn sm" onclick="cfgN('${k}',1)">+</button><button class="btn sm" onclick="cfgN('${k}',10)">+10</button></div></div>
+    <div class="chips">${pr.map((x,i)=>`<button class="chip ${i===p.p?'on':''}" onclick="cfgProd('${k}',${i})">${x[0]}<small>${fmt(x[1]*SC)} / seat</small></button>`).join('')}</div>
+    ${p.pt!=null&&k!=='F'&&k!=='C'?`<div class="row" style="margin-top:10px"><span class="s">Seat pitch</span><div class="step"><button class="btn sm" onclick="cfgPt('${k}',-1)" ${p.pt<=lim[0]?'disabled':''}>−</button><b>${p.pt} in</b><button class="btn sm" onclick="cfgPt('${k}',1)" ${p.pt>=lim[1]?'disabled':''}>+</button></div></div>`:''}</div>`}).join('');
+  return back(`<b>${m.name}</b>`,refit?{t:'sched'}:null,true)+`<div class="card"><div class="row"><div><div class="s">Seats</div><b class="num">${seatsOf(c)}</b></div><div style="text-align:center"><div class="s">Cabin space</div><b class="num">${Math.round(used)} / ${m.seats}</b></div><div style="text-align:right"><div class="s">${refit?'Refit cost':'Config cost'}</div><b class="num">${fmt(cfgCost(c))}</b></div></div><div class="bar"><i style="width:${Math.min(100,used/m.seats*100)}%"></i></div></div>${cls}
+  <div class="acts"><button class="btn" onclick="saveDlg()">Save config</button><button class="btn" onclick="loadDlg('${g.mid}')">Load config</button></div>
+  <div class="acts">${refit?`<button class="btn p" onclick="applyRefit()">Apply · ${fmt(cfgCost(c))}</button>`:`<button class="btn p" onclick="setPage({t:'buy',mid:'${g.mid}'})">✓ Done</button>`}</div>`;
+}
+function cfgN(k,d){const c=curCfg(),cap=model(UI.page.mid).seats,st=Math.sign(d);delete c.name;
+  for(let i=0;i<Math.abs(d);i++){const bak=clone(c);c[k].n+=st;if(c[k].n<0){c[k].n=0;break}
+    if(k!=='Y'&&st>0)while(usedSpace(c)>cap+1e-6&&c.Y.n>0)c.Y.n--; // make room by trimming economy
+    if(usedSpace(c)>cap+1e-6){Object.assign(c,bak);break}}
+  render()}
+function cfgProd(k,i){const c=curCfg();c[k].p=i;delete c.name;fitCfg(c,model(UI.page.mid).seats);render()}
+function cfgPt(k,d){const c=curCfg(),lim=k==='Y'?[26,34]:[34,42];c[k].pt=Math.max(lim[0],Math.min(lim[1],c[k].pt+d));delete c.name;fitCfg(c,model(UI.page.mid).seats);render()}
+function saveDlg(){
+  const mid=UI.page.mid,c=curCfg();dlg(`<h3>Save config</h3><p style="margin-bottom:10px">${cfgStr(c)} for ${model(mid).name}</p><input type="text" id="cn" maxlength="24" value="${esc(c.name||'My config')}"><div class="acts"><button class="btn" onclick="closeDlg()">Cancel</button><button class="btn p" id="cs">Save</button></div>`);
+  $('#cs').onclick=()=>{const n=$('#cn').value.trim()||'My config',L=S.cfgs[mid]=S.cfgs[mid]||[],e={name:n,cfg:Object.assign(clone(c),{name:undefined})},i=L.findIndex(x=>x.name===n);delete e.cfg.name;if(i>=0)L[i]=e;else L.push(e);c.name=n;closeDlg();render()};
+}
+function loadDlg(mid){
+  const L=S.cfgs[mid]||[];
+  dlg(`<h3>Load config</h3><p style="margin-bottom:10px">${model(mid).name}</p>${L.length?L.map((e,i)=>`<div class="card"><div class="row"><div><div class="t">${esc(e.name)}</div><div class="s">${cfgStr(e.cfg)} · ${S.planes.filter(p=>p.modelId===mid&&p.cfg&&p.cfg.name===e.name).length} equipped</div></div><span class="pill">Y ${rate('Y',e.cfg.Y)}% · C ${rate('C',e.cfg.C)}%</span></div><div class="acts"><button class="btn sm p" onclick="pickCfg('${mid}',${i})">Select</button><button class="btn sm d" onclick="delCfg('${mid}',${i})">Delete</button></div></div>`).join(''):'<p>No saved configs yet. Edit a config and save it.</p>'}<div class="acts"><button class="btn" onclick="closeDlg()">Close</button></div>`);
+}
+function pickCfg(mid,i){const e=S.cfgs[mid][i];setCfg(Object.assign(clone(e.cfg),{name:e.name}));closeDlg();render()}
+function delCfg(mid,i){S.cfgs[mid].splice(i,1);loadDlg(mid)}
+function refitOpen(pid){const p=plane(pid);UI.refit=clone(cfgOf(p));setPage({t:'cfg',mid:p.modelId,mode:'refit',pid})}
+function applyRefit(){const p=plane(UI.page.pid),cost=cfgCost(UI.refit);if(S.cash<cost)return info('Insufficient funds',`You need ${fmt(cost-S.cash)} more.`);confirmDlg('Apply new config?',`${p.reg} will be refitted to ${cfgStr(UI.refit)} for ${fmt(cost)}.`,'Apply',()=>{S.cash-=cost;p.cfg=clone(UI.refit);UI.tab='fleet';UI.page=null;render()})}
+
+function buyList(){
+  const q=UI.q.toLowerCase().trim(),v=UI.buy;
+  if(v==='gates'&&!ownedHubs().length)return empty('You need at least one hub before buying gates.');
+  const list=HUBS.filter(h=>(v!=='hubs'||h.iso===S.homeCountry)&&(!q||[h.city,h.country,h.code,h.icao].some(x=>x.toLowerCase().includes(q))));
+  if(!list.length)return empty('No airports match.');
+  return (v==='gates'?'<div class="s" style="margin:0 2px 10px">Gates can\'t be bought in a hub city unless you own two or more hubs.</div>':'')+list.map(h=>{
+    if(v==='hubs')return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${h.country} · Demand ${dem(h)}</div></div>${S.hubs[h.id]?'<span class="pill on">Owned</span>':`<button class="btn sm p" onclick="buyHub('${h.id}')" ${S.cash<h.price?'disabled':''}>${fmt(h.price)}</button>`}</div>`;
+    const n=gateCount(h.id);if(S.hubs[h.id]&&ownedHubs().length<2)return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">Your hub city</div></div><span class="pill">Hub</span></div>`;
+    return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${n}/${MAX_GATES} gates · ${fmt(h.gatePrice)} each · Demand ${dem(h)}</div></div>${n>=MAX_GATES?'<span class="pill">Max</span>':`<button class="btn sm p" onclick="buyGates('${h.id}')" ${S.cash<h.gatePrice?'disabled':''}>Buy</button>`}</div>`}).join('');
+}
+function buyHub(id){const h=hub(id);if(S.hubs[id])return;if(S.cash<h.price)return info('Insufficient funds',`You need ${fmt(h.price-S.cash)} more.`);confirmDlg('Buy hub?',`Acquire ${h.flag} ${h.city} (${h.code} · ${h.icao}) for ${fmt(h.price)}?\nAircraft are based at your hubs and routes start from them.`,'Buy hub',()=>{S.cash-=h.price;S.hubs[id]=true;render()})}
+
+// ---- Vault
+function viewVault(){
+  return `<div class="card" style="text-align:center;padding:28px 16px"><div class="s">Uncollected earnings</div><div class="num" style="font-size:34px;font-weight:700;letter-spacing:-.03em;margin:4px 0 14px">${fmt(S.vault)}</div><button class="btn p" onclick="collect()" ${S.vault<=0?'disabled':''} style="width:100%;padding:11px">Collect ${fmt(S.vault)}</button></div>
+  <div class="s" style="line-height:1.6;margin:0 2px 8px">Each flight credits its profit to the vault when it lands. Collect it to spend it.</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><div class="s">Total revenue</div><b class="num">${fmt(S.totalRevenue)}</b></div><div class="card"><div class="s">Cash</div><b class="num">${fmt(S.cash)}</b></div></div>
+  <div style="text-align:center;margin-top:24px"><button class="btn sm d" onclick="resetGame()">New airline</button><div class="s" style="margin-top:6px">Progress is saved automatically in this browser.</div></div>`;
+}
+function collect(){if(S.vault<=0)return;S.cash+=S.vault;S.vault=0;render()}
+
+// ==================== LOOP ====================
+let tickN=0;
+setInterval(()=>{
+  if(!window.READY)return;
+  simulate();tickN++;
+  if(tickN%2===0){S.history.nw.push(S.cash+S.vault);S.history.rev.push(S.totalRevenue);if(S.history.nw.length>240){S.history.nw.shift();S.history.rev.shift()}}
+  head();
+  const ae=document.activeElement,busy=$('#ov').classList.contains('show')||(ae&&/INPUT|SELECT/.test(ae.tagName))||(UI.page&&/^(open|buy|cfg|rot)$/.test(UI.page.t))||UI.tab==='buy'||document.querySelector('.dd.open');
+  if(!busy&&tickN%4===0)render();else if(tickN%10===0)save();
+},1000);
+window.addEventListener('beforeunload',save);
+
+// ==================== BOOT ====================
+async function boot(){
+  try{
+    const get=n=>fetch('data/'+n+'.json').then(r=>{if(!r.ok)throw 0;return r.json()});
+    const [c,a,ac]=await Promise.all([get('countries'),get('airports'),get('aircraft')]);
+    COUNTRIES=c;MAKERS=ac.makers;FAMILIES=ac.families;AIRCRAFT=ac.aircraft;
+    HUBS=a.map(x=>({id:x.code.toLowerCase(),code:x.code,icao:x.icao,demand:x.demand,city:x.city,iso:x.iso,lat:x.lat,lon:x.lon,price:x.hubPrice,gatePrice:x.gatePrice,flag:flag(x.iso),country:(c.find(k=>k.iso===x.iso)||{}).name}))
+      .sort((p,q)=>p.country.localeCompare(q.country)||p.city.localeCompare(q.city));
+  }catch(e){$('#view').innerHTML=empty('Could not load the data files.<br>Serve this folder over http, e.g. <b>python3 -m http.server</b>, then open game.html.');return}
+  load();if(!S.started){location.replace('index.html');return}
+  window.READY=true;render();
+}
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Airline Manager</title>
+<link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css">
+<link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-solid-rounded/css/uicons-solid-rounded.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap"><div class="box">
+  <div class="brand" style="margin-bottom:18px"><div class="logo"><i class="fi fi-sr-plane-departure"></i></div><div><div class="name">Airline Manager</div><div class="s" style="margin:0">Create your airline</div></div></div>
+  <div id="cont"></div>
+  <div class="card" style="padding:18px">
+    <label class="s" for="nm" style="margin-top:0">Airline name</label>
+    <input type="text" id="nm" maxlength="30" value="Sky Pacific Airlines" autocomplete="off">
+    <label class="s" for="cq">Registration country</label>
+    <input type="text" id="cq" placeholder="Search 190+ countries" autocomplete="off">
+    <div class="clist" id="cl" role="listbox" aria-label="Countries"></div>
+    <div class="s" style="text-align:center;margin-top:18px">Aircraft registration</div>
+    <div class="reg" id="reg">—</div>
+    <div class="s" style="text-align:center" id="hint">Your hubs will be airports in this country.</div>
+    <div class="acts"><button class="btn p" id="go" style="padding:12px" disabled>Start airline</button></div>
+  </div>
+</div></div>
+<script>
+const SAVE_KEY='airline-manager-save-v4';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const flag=iso=>String.fromCodePoint(...[...iso].map(c=>127397+c.charCodeAt(0)));
+let C=[],sel=null;
+
+function sample(c){return c.prefix==='N'?'N101':c.prefix+'-ABC'}
+function draw(){
+  const q=$('#cq').value.toLowerCase().trim();
+  const list=C.filter(c=>!q||c.name.toLowerCase().includes(q)||c.prefix.toLowerCase().includes(q));
+  $('#cl').innerHTML=list.length?list.map(c=>`<button class="crow ${sel&&sel.iso===c.iso?'on':''}" data-i="${c.iso}" role="option"><span>${c.flag}</span><span>${esc(c.name)}</span><span class="pf">${c.prefix}</span></button>`).join(''):'<div class="empty" style="padding:24px">No country found</div>';
+  $('#reg').textContent=sel?sample(sel):'—';
+  $('#go').disabled=!sel;
+}
+$('#cl').addEventListener('click',e=>{const b=e.target.closest('.crow');if(!b)return;sel=C.find(c=>c.iso===b.dataset.i);draw()});
+$('#cq').addEventListener('input',draw);
+
+$('#go').onclick=()=>{
+  const name=$('#nm').value.trim()||'Sky Pacific Airlines';
+  const start=()=>{try{localStorage.setItem(SAVE_KEY,JSON.stringify({started:true,airlineName:name,homeCountry:sel.iso}))}catch(e){}location.href='game.html'};
+  let has=false;try{has=!!JSON.parse(localStorage.getItem(SAVE_KEY)||'null')?.started}catch(e){}
+  if(!has)return start();
+  $('#dlg').innerHTML=`<h3>Replace saved airline?</h3><p>Starting a new airline deletes your current progress.</p><div class="acts"><button class="btn" onclick="document.getElementById('ov').classList.remove('show')">Cancel</button><button class="btn d" id="ok">Replace</button></div>`;
+  $('#ov').classList.add('show');$('#ok').onclick=start;
+};
+
+// Existing save → offer to continue
+try{
+  const d=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');
+  if(d&&d.started)$('#cont').innerHTML=`<a href="game.html" class="card row" style="text-decoration:none;color:inherit;cursor:pointer"><div><div class="s" style="margin:0">Continue</div><div class="t">${esc(d.airlineName)}</div></div><span class="btn p sm">Play</span></a>`;
+}catch(e){}
+
+fetch('data/countries.json').then(r=>{if(!r.ok)throw 0;return r.json()}).catch(()=>fetch('countries.json').then(r=>{if(!r.ok)throw 0;return r.json()})).then(list=>{
+  C=list.map(c=>({...c,flag:flag(c.iso)})).sort((a,b)=>a.name.localeCompare(b.name));
+  const me=C.find(c=>c.iso==='ID');sel=me;draw();
+}).catch(()=>{$('#cl').innerHTML='<div class="empty" style="padding:24px">Could not load countries.json.<br>Put it in a <b>data</b> folder next to index.html and serve the folder over http.</div>'});
+</script>
+<div id="ov"><div class="dlg" id="dlg"></div></div>
+</body>
+</html>
