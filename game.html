@@ -20,18 +20,18 @@
 // ==================== DATA (data/*.json) ====================
 let HUBS=[],COUNTRIES=[],AIRCRAFT=[],FAMILIES={},MAKERS={};
 const flag=iso=>String.fromCodePoint(...[...iso].map(c=>127397+c.charCodeAt(0)));
-const MAX_GATES=7,SELL_RATE=.6,SAVE_KEY='airline-manager-save-v4',WEEK=10080,STEP=30,TURN=60,TA_MIN=30,DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],PM={Y:1,W:1.6,C:3.2};
-const $=s=>document.querySelector(s),fmt=n=>'$'+Math.round(n).toLocaleString('en-US'),fmtN=n=>Math.round(n).toLocaleString('en-US');
+const MAX_GATES=7,SELL_RATE=.6,SAVE_KEY='airline-manager-save-v5',WEEK=10080,STEP=30,TURN=60,TA_MIN=30,DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],PM={Y:1,W:1.6,C:3.2};
+const $=s=>document.querySelector(s),fmt=n=>{const a=Math.abs(n),g=n<0?'-$':'$';return a>=1e9?g+(a/1e9).toFixed(2)+'B':a>=1e6?g+(a/1e6).toFixed(2)+'M':a>=1e4?g+Math.round(a/1e3)+'K':g+Math.round(a).toLocaleString('en-US')},fmtN=n=>Math.round(n).toLocaleString('en-US');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const hub=id=>HUBS.find(h=>h.id===id),country=iso=>COUNTRIES.find(c=>c.iso===iso),model=id=>AIRCRAFT.find(a=>a.id===id);
 const plane=id=>S.planes.find(p=>p.id===id),route=id=>S.routes.find(r=>r.id===id);
 
 // ==================== STATE ====================
-const fresh=()=>({started:false,cash:1000000,vault:0,totalRevenue:0,airlineName:'Sky Pacific Airlines',homeCountry:'ID',history:{nw:[],rev:[]},hubs:{},gates:{},routes:[],nextRouteId:1,planes:[],nextPlaneId:1,regCounter:{},clock:540,pending:[],cfgs:{},seq:0});
+const fresh=()=>({started:false,cash:null,speed:4,vault:0,totalRevenue:0,airlineName:'Sky Pacific Airlines',homeCountry:'ID',history:{nw:[],rev:[]},hubs:{},gates:{},routes:[],nextRouteId:1,planes:[],nextPlaneId:1,regCounter:{},clock:540,pending:[],cfgs:{},seq:0});
 let S=fresh();
-const UI={tab:'home',owned:'routes',buy:'hubs',q:'',maker:null,openAc:'',openSort:'dem_desc',rotMode:'both',rotErr:'',drafts:{},buyQ:1,refit:null,open:{},openM:{},page:null,rangeHub:null,rangeKm:3000};
-function save(){if(!window.READY)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(S))}catch(e){}}
-function load(){try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return;S=Object.assign(fresh(),JSON.parse(raw));S.planes=S.planes.filter(p=>model(p.modelId));S.planes.forEach(p=>p.sched=p.sched||[])}catch(e){S=fresh()}}
+const UI={tab:'home',owned:'routes',buy:'hubs',q:'',maker:null,openAc:'',openSort:'dem_desc',rotMode:'both',rotErr:'',drafts:{},buyQ:1,refit:null,open:{},openM:{},page:null,rangeHub:null,rangeKm:3000,sel:false,picked:{}};
+function save(){if(!window.READY)return;S.savedAt=Date.now();try{localStorage.setItem(SAVE_KEY,JSON.stringify(S))}catch(e){}}
+function load(){try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return;S=Object.assign(fresh(),JSON.parse(raw));S.planes=S.planes.filter(p=>model(p.modelId));S.planes.forEach(p=>p.sched=p.sched||[]);S.routes.forEach(r=>{if(r.demand&&r.demand.L==null)r.demand=calcDemand(r,r.week||0)})}catch(e){S=fresh()}}
 function resetGame(){confirmDlg('New airline?','Your current progress will be deleted.','Start over',()=>{try{localStorage.removeItem(SAVE_KEY)}catch(e){}location.href='index.html'},true)}
 
 // ==================== HELPERS ====================
@@ -57,40 +57,45 @@ function calcDemand(r,week){
   const k=r.from+'>'+r.to,base=routeM(r.from,r.to,r.distance)/4.345;
   const f=(.75+.5*rnd(k))*(1+.15*Math.sin(2*Math.PI*(week/52+rnd(k+'p'))))*(1+(rnd(k+week)-.5)*.14);
   const T=Math.max(20,Math.round(base*f)),C=Math.round(T*(.03+.06*rnd(k+'c'))),W=Math.round(T*(.04+.04*rnd(k+'w')));
-  return{Y:T-C-W,W,C};
+  const cf=(.6+.8*rnd(k+'cg'))*(1+.18*Math.sin(2*Math.PI*(week/26+rnd(k+'q'))))*(1+(rnd(k+week+'g')-.5)*.2),CT=Math.max(2,Math.round(T*.032*cf)),L=Math.round(CT*(.5+.2*rnd(k+'l')));
+  return{Y:T-C-W,W,C,L,M:CT-L};
 }
 const sumD=d=>d.Y+d.W+d.C;
 function newWeek(r,w){r.week=w;r.demand=calcDemand(r,w)}
-const openCost=(from,to,d)=>Math.max(5000,Math.round((3000+routeM(from,to,d)/4.345*2.5)/1000)*1000);
+const openCost=(from,to,d)=>Math.max(250000,Math.round((150000+routeM(from,to,d)/4.345*125)/10000)*10000);
 
 // ---- aircraft / flights
 const clone=o=>JSON.parse(JSON.stringify(o));
-const KEYS=['F','C','W','Y'],CNAME={F:'First',C:'Business',W:'Premium eco.',Y:'Economy'},PMUL={Y:1,W:1.6,C:3.2,F:6},SC=.02;
+const cargoCap=m=>Math.max(1,Math.round(.012*Math.pow(m.seats,1.15)));
+function fixCfg(c,m){if(!c.L){const cc=cargoCap(m),l=Math.round(cc/2);c.L={n:l};c.M={n:cc-l}}return c}
+const KEYS=['F','C','W','Y'],CNAME={F:'First',C:'Business',W:'Premium eco.',Y:'Economy'},PMUL={Y:1,W:1.6,C:3.2,F:6},SC=1;
 // [name, price per seat, comfort rating, space factor (C/F)]
 const PROD={Y:[['Super Slim',2000,40],['Slim',2500,52],['Standard',3000,64],['Comfort',4000,70],['Luxury',5000,76]],W:[['Basic',7000,73],['Standard',7500,80],['Comfort',8000,87],['Luxury',8500,94]],C:[['European',6000,70,1.5],['Regional',8000,82,2],['Full Flat',20000,98,3.5],['Parallel Flat',22000,102,3.8],['Staggered',25000,104,4],['Reverse Herringbone',30000,107,4.2]],F:[['Regional',12000,100,4],['Solo Suite',40000,108,6],['Open Suite',40000,110,6.5]]};
 const SPACE={Y:p=>p.pt/30,W:p=>1.6*p.pt/36,C:p=>PROD.C[p.p][3],F:p=>PROD.F[p.p][3]};
 const rate=(k,p)=>{const b=PROD[k][p.p][2];return Math.max(0,Math.min(120,Math.round(k==='Y'?b+(p.pt-30)*3:k==='W'?b+(p.pt-36)*2.5:b)))};
 const seatsOf=c=>KEYS.reduce((n,k)=>n+c[k].n,0),usedSpace=c=>KEYS.reduce((n,k)=>n+c[k].n*SPACE[k](c[k]),0);
-const cfgCost=c=>Math.round(KEYS.reduce((n,k)=>n+c[k].n*PROD[k][c[k].p][1],0)*SC);
-const cfgStr=c=>KEYS.filter(k=>c[k].n).map(k=>k+c[k].n).join(' / ');
-function defaultCfg(m){const c={F:{n:0,p:0},C:{n:0,p:0},W:{n:0,p:0,pt:36},Y:{n:0,p:2,pt:30}};if(m.seats>80){c.C={n:Math.round(m.seats*.05),p:1};c.W={n:Math.round(m.seats*.06),p:0,pt:36}}c.Y.n=Math.floor(m.seats-usedSpace(c));return c}
+const cfgCost=c=>Math.round((KEYS.reduce((n,k)=>n+c[k].n*PROD[k][c[k].p][1],0)+(c.L?c.L.n*8000+c.M.n*12000:0))*SC);
+const cfgStr=c=>KEYS.filter(k=>c[k].n).map(k=>k+c[k].n).join(' / ')+(c.L&&c.L.n+c.M.n?` · ${c.L.n+c.M.n}t cargo`:'');
+function defaultCfg(m){const c={F:{n:0,p:0},C:{n:0,p:0},W:{n:0,p:0,pt:36},Y:{n:0,p:2,pt:30}};if(m.seats>80){c.C={n:Math.round(m.seats*.05),p:1};c.W={n:Math.round(m.seats*.06),p:0,pt:36}}c.Y.n=Math.floor(m.seats-usedSpace(c));const cc=cargoCap(m),l=Math.round(cc/2);c.L={n:l};c.M={n:cc-l};return c}
 function fitCfg(c,cap){for(const k of ['Y','W','C','F'])while(usedSpace(c)>cap+1e-6&&c[k].n>0)c[k].n--}
-const cfgOf=p=>p.cfg||(p.cfg=defaultCfg(model(p.modelId)));
-const FR={Y:1,W:1.79,C:3.93,F:7.5},taOf=s=>s.ta??TURN,pad=n=>String(n).padStart(2,'0');
-const defFares=d=>{const b=baseTicket(d);return{Y:b,W:Math.round(b*FR.W),C:Math.round(b*FR.C),F:Math.round(b*FR.F)}};
-const fareOf=r=>r.fares||(r.fares={...defFares(r.distance),...(r.ticket?{Y:r.ticket}:{})});
+const cfgOf=p=>fixCfg(p.cfg||(p.cfg=defaultCfg(model(p.modelId))),model(p.modelId));
+const FR={Y:1,W:1.79,C:3.93,F:7.5,L:8.5,M:4.5},taOf=s=>s.ta??TURN,pad=n=>String(n).padStart(2,'0');
+const defFares=d=>{const b=baseTicket(d);return{Y:b,W:Math.round(b*FR.W),C:Math.round(b*FR.C),F:Math.round(b*FR.F),L:Math.round(b*FR.L),M:Math.round(b*FR.M)}};
+const fareOf=r=>{if(!r.fares)r.fares={...defFares(r.distance),...(r.ticket?{Y:r.ticket}:{})};if(r.fares.L==null){const d=defFares(r.distance);r.fares.L=d.L;r.fares.M=d.M}return r.fares};
 const lfk=(r,k)=>Math.min(.98,.78*Math.pow(baseTicket(r.distance)*FR[k]/fareOf(r)[k],1.3));
 const lf=r=>lfk(r,'Y');
 const legCost=(m,r)=>Math.round(m.fuel*(2+8*r.distance/2000));
-const legCap=(m,r,cfg)=>{const c={};for(const k of ['Y','W','C','F'])c[k]=Math.round(cfg[k].n*Math.min(.98,lfk(r,k)*(.7+rate(k,cfg[k])/213)));return c};
+const legCap=(m,r,cfg)=>{const c={};for(const k of ['Y','W','C','F'])c[k]=Math.round(cfg[k].n*Math.min(.98,lfk(r,k)*(.7+rate(k,cfg[k])/213)));for(const k of ['L','M'])c[k]=cfg[k].n*Math.min(.98,lfk(r,k));return c};
 // Each rotation (oldest first) takes its weekly passengers out of the route demand, like subtraction.
 // Later rotations only get what is left, and earlier ones never lose passengers to them.
-function alloc(r){
+let ALCACHE=null;
+function alloc(r){if(ALCACHE&&ALCACHE.has(r.id))return ALCACHE.get(r.id);const res=allocCalc(r);if(ALCACHE)ALCACHE.set(r.id,res);return res}
+function allocCalc(r){
   const rem={...r.demand},out=new Map(),items=[],f=fareOf(r);
   S.planes.forEach(p=>p.sched.forEach(s=>{if(s.rid===r.id)items.push([p,s])}));
   items.sort((a,b)=>(a[1].seq||0)-(b[1].seq||0));
   for(const [p,s] of items){const m=model(p.modelId),cap=legCap(m,r,cfgOf(p)),legs=dayCount(s)*2,pax={};let rev=0;
-    for(const k of ['Y','W','C','F']){const pool=k==='F'?'C':k,w=Math.max(0,Math.min(legs*cap[k],Math.floor(rem[pool])));rem[pool]-=w;pax[k]=legs?w/legs:0;rev+=w*f[k]}
+    for(const k of ['Y','W','C','F','L','M']){const pool=k==='F'?'C':k,av=k==='L'||k==='M'?rem[pool]:Math.floor(rem[pool]),w=Math.max(0,Math.min(legs*cap[k],av));rem[pool]-=w;pax[k]=legs?w/legs:0;rev+=w*f[k]}
     out.set(s,{pax,rev,legs,cost:legs*legCost(m,r)})}
   return{out,rem};
 }
@@ -108,15 +113,26 @@ function hasConflict(p,list){
   return false;
 }
 
+// Starting capital: just enough for the cheapest hub in the home country, an A320-100 with default seats,
+// and the cheapest route + gate it can fly from that hub (plus 2%).
+function startCash(){
+  const m=model('a320-100'),base=m.price+cfgCost(defaultCfg(m));let best=Infinity;
+  HUBS.filter(h=>h.iso===S.homeCountry).forEach(h=>{let rt=Infinity;
+    HUBS.forEach(x=>{if(x.id===h.id)return;const d=dist(h.id,x.id);if(d<=m.range)rt=Math.min(rt,openCost(h.id,x.id,d)+x.gatePrice)});
+    best=Math.min(best,h.price+rt)});
+  return Math.ceil((base+best)*1.02/1e5)*1e5;
+}
+function cycleSpeed(){const L=[1,2,4,8,16];S.speed=L[(L.indexOf(S.speed)+1)%L.length]||4;head();save()}
 // ==================== SIMULATION ====================
-function depart(p,s,r,arr){const a=alloc(r).out.get(s);if(!a)return;S.pending.push({at:arr,rev:(a.legs?a.rev/a.legs:0)-legCost(model(p.modelId),r),pid:p.id})}
-function simulate(){
-  const t0=S.clock,t1=t0+STEP;S.clock=t1;
+function depart(p,s,r,arr,al){const a=(al||alloc(r)).out.get(s);if(!a)return;S.pending.push({at:arr,rev:(a.legs?a.rev/a.legs:0)-legCost(model(p.modelId),r),pid:p.id})}
+function simulate(step){
+  const t0=S.clock,t1=t0+(step||15*(S.speed||4));S.clock=t1;
   const w=Math.floor(t1/WEEK);S.routes.forEach(r=>{if(r.week<w)newWeek(r,w)});
+  const AC={},al=r=>AC[r.id]??=alloc(r);
   S.planes.forEach(p=>p.sched.forEach(s=>{
     const r=route(s.rid);if(!r)return;const f=fm(r.distance,model(p.modelId).speed);
     for(let D=Math.floor(t0/1440)-2;D<=Math.floor(t1/1440);D++){if(!s.days[((D%7)+7)%7])continue;
-      [0,f+taOf(s)].forEach(o=>{const dep=D*1440+s.dep+o;if(dep>t0&&dep<=t1)depart(p,s,r,dep+f)})}
+      [0,f+taOf(s)].forEach(o=>{const dep=D*1440+s.dep+o;if(dep>t0&&dep<=t1)depart(p,s,r,dep+f,al(r))})}
   }));
   S.pending=S.pending.filter(e=>{if(e.at<=t1){S.vault+=e.rev;S.totalRevenue+=e.rev;const p=plane(e.pid);if(p)p.totalEarned=(p.totalEarned||0)+e.rev;return false}return true});
 }
@@ -125,10 +141,11 @@ function simulate(){
 const DD={};
 function dd(id,opts,val,on){DD[id]={val:String(val),on,opts};const cur=opts.find(o=>String(o[0])===String(val))||opts[0];
   return `<div class="dd" id="dd-${id}"><button type="button" class="ddb" onclick="ddToggle('${id}',event)"><span>${cur[1]}</span><i class="fi fi-rr-angle-small-down"></i></button><div class="ddl">${opts.map(o=>`<button type="button" data-v="${esc(o[0])}" class="${String(o[0])===String(val)?'on':''}" onclick="ddPick('${id}',this.dataset.v)">${o[1]}</button>`).join('')}</div></div>`}
+function kebab(id,items){return `<div class="dd" id="dd-kb${id}" data-w="170"><button type="button" class="kbtn" aria-label="More actions" onclick="ddToggle('kb${id}',event)">⋮</button><div class="ddl">${items.map(([l,fn,c])=>`<button type="button" class="${c||''}" onclick="ddClose();${fn}">${l}</button>`).join('')}</div></div>`}
 function ddClose(){document.querySelectorAll('.dd.open').forEach(x=>x.classList.remove('open'))}
 function ddToggle(id,e){e.stopPropagation();const el=document.getElementById('dd-'+id),open=!el.classList.contains('open');ddClose();if(!open)return;
-  const b=el.querySelector('.ddb').getBoundingClientRect(),l=el.querySelector('.ddl'),below=innerHeight-b.bottom-16,above=b.top-16,up=below<200&&above>below;
-  l.style.left=b.left+'px';l.style.width=b.width+'px';l.style.maxHeight=Math.min(280,up?above:below)+'px';
+  const b=el.querySelector('.ddb,.kbtn').getBoundingClientRect(),w=+el.dataset.w||b.width,l=el.querySelector('.ddl'),below=innerHeight-b.bottom-16,above=b.top-16,up=below<200&&above>below;
+  l.style.left=(el.dataset.w?Math.max(8,b.right-w):b.left)+'px';l.style.width=w+'px';l.style.maxHeight=Math.min(280,up?above:below)+'px';
   if(up){l.style.top='auto';l.style.bottom=(innerHeight-b.top+6)+'px'}else{l.style.bottom='auto';l.style.top=(b.bottom+6)+'px'}
   el.classList.add('open')}
 function ddPick(id,v){const d=DD[id],el=document.getElementById('dd-'+id);d.val=v;ddClose();
@@ -147,24 +164,25 @@ function confirmDlg(t,m,ok,fn,danger){dlg(`<h3>${t}</h3><p>${m}</p><div class="a
 function info(t,m){dlg(`<h3>${t}</h3><p>${m}</p><div class="acts"><button class="btn p" onclick="closeDlg()">OK</button></div>`)}
 
 // ==================== RENDER ====================
-const TABS=[['home','Home','fi-sr-home'],['fleet','Fleet','fi-sr-plane'],['owned','Airport','fi-sr-marker'],['buy','Buy','fi-sr-shopping-cart'],['vault','Vault','fi-sr-vault']];
+const TABS=[['home','Home','fi-sr-home'],['fleet','Fleet','fi-sr-plane'],['owned','Airport','fi-sr-marker'],['buy','Buy','fi-sr-shopping-cart'],['finance','Finances','fi-sr-vault']];
 const seg=(key,items)=>`<div class="seg">${items.map(([v,l])=>`<button class="${UI[key]===v?'on':''}" onclick="setUI('${key}','${v}')">${l}</button>`).join('')}</div>`;
 const empty=t=>`<div class="empty"><i class="fi fi-rr-plane"></i>${t}</div>`;
 const back=(extra='',_t,toBuy)=>`<div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="${toBuy?(UI.page.mode==='refit'?'UI.page=null;render()':`setPage({t:'buy',mid:'${UI.page.mid}'})`):'setPage(null)'}">‹ Back</button>${extra}</div>`;
-function setUI(k,v){UI[k]=v;if(k==='buy'||k==='owned')UI.q='';render()}
-function go(t,k,v){UI.tab=t;UI.page=null;if(k)UI[k]=v;render()}
+function setUI(k,v){UI[k]=v;UI.sel=false;UI.picked={};if(k==='buy'||k==='owned')UI.q='';render()}
+function go(t,k,v){UI.tab=t;UI.page=null;UI.sel=false;UI.picked={};if(k)UI[k]=v;render()}
 function setPage(p){UI.page=p;render();scrollTo(0,0)}
 function head(){
   $('#hName').textContent=S.airlineName;$('#hCash').textContent=fmt(S.cash);
-  $('#hStats').innerHTML=[['fi-rr-clock',clockStr(S.clock)],['fi-rr-plane',S.planes.length],['fi-sr-marker',ownedHubs().length],['fi-rr-route',S.routes.length]].map(([i,n])=>`<span><i class="fi ${i}"></i>${n}</span>`).join('');
+  $('#hStats').innerHTML=[['fi-rr-clock',clockStr(S.clock)],['fi-rr-plane',S.planes.length],['fi-sr-marker',ownedHubs().length],['fi-rr-route',S.routes.length]].map(([i,n])=>`<span><i class="fi ${i}"></i>${n}</span>`).join('')+`<span style="cursor:pointer" onclick="cycleSpeed()" role="button" aria-label="Game speed">⏩ ×${S.speed||4}</span>`;
 }
-function render(){
+function render(){ALCACHE=new Map();try{renderInner()}finally{ALCACHE=null}}
+function renderInner(){
   head();
   $('#nav').innerHTML=TABS.map(([t,l,ic])=>`<button class="${UI.tab===t?'on':''}" onclick="go('${t}')" aria-label="${l}"><i class="fi ${ic}"></i>${l}</button>`).join('');
   const pg=UI.page;if(pg&&((pg.t==='route'&&!route(pg.id))||(pg.t==='sched'&&!plane(pg.id))||(pg.t==='rot'&&!(plane(pg.pid)&&plane(pg.pid).sched[pg.i]))))UI.page=null;
   const v=$('#view');
   if(UI.page)v.innerHTML=({open:pageOpen,route:()=>pageRoute(UI.page.id),sched:()=>pageSched(UI.page.id),rot:pageRot,buy:pageBuy,cfg:pageCfg})[UI.page.t]();
-  else v.innerHTML={home:viewHome,fleet:viewFleet,owned:viewOwned,buy:viewBuy,vault:viewVault}[UI.tab]();
+  else v.innerHTML={home:viewHome,fleet:viewFleet,owned:viewOwned,buy:viewBuy,finance:viewFinance}[UI.tab]();
   save();
 }
 
@@ -176,11 +194,12 @@ function chart(){
   const pts=a=>a.map((v,i)=>`${(i/(a.length-1)*W).toFixed(1)},${(H-8-(v-lo)/((hi-lo)||1)*(H-16)).toFixed(1)}`).join(' ');
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:180px;display:block;color:var(--accent)" role="img" aria-label="Net worth and revenue"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><polygon points="0,${H} ${pts(nw)} ${W},${H}" fill="url(#g)"/><polyline points="${pts(rv)}" fill="none" stroke="#7f8794" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/><polyline points="${pts(nw)}" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="row s" style="margin-top:8px"><span>${fmt(lo)}</span><span>${fmt(hi)}</span></div>`;
 }
+function destStats(){const m={};S.routes.forEach(r=>{const o=m[r.to]??={id:r.to,flights:0};o.flights+=legsWeek(r)/2});return Object.values(m).sort((a,b)=>b.flights-a.flights)}
 function viewHome(){
-  const nw=S.cash+S.vault,d=nw-(S.history.nw[0]??nw);
-  return `<div class="card hero"><div class="s">Net worth</div><div class="big num">${fmt(nw)}</div><div class="s ${d>=0?'good':'bad'}">${d>=0?'+':'−'}${fmt(Math.abs(d))} this session</div></div>
-  <div class="card"><div class="row" style="margin-bottom:10px"><b>Finances</b><span class="s">━ Net worth &nbsp;╌ Revenue</span></div>${chart()}</div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"><div class="card"><div class="s">Cash</div><b class="num">${fmt(S.cash)}</b></div><div class="card"><div class="s">Vault</div><b class="num">${fmt(S.vault)}</b></div><div class="card"><div class="s">Revenue</div><b class="num">${fmt(S.totalRevenue)}</b></div></div>`;
+  const nw=S.cash+S.vault,d=nw-(S.history.nw[0]??nw),ds=destStats(),top=ds[0],th=top&&hub(top.id);
+  return `<div class="card"><div class="row" style="margin-bottom:12px"><div><div class="s">Net worth</div><b class="num" style="font-size:22px">${fmt(nw)}</b></div><span class="s ${d>=0?'good':'bad'}">${d>=0?'+':'−'}${fmt(Math.abs(d))} this session</span></div>${chart()}<div class="row s" style="margin-top:6px"><span>━ Net worth</span><span>╌ Revenue</span></div></div>
+  <div class="tiles" style="grid-template-columns:1fr 1fr;margin-top:0"><div><span class="s">Aircraft</span><b class="num" style="font-size:24px">${S.planes.length}</b></div><div><span class="s">Destinations</span><b class="num" style="font-size:24px">${ds.length}</b></div></div>
+  <h2>Most active destination</h2>${top&&top.flights?`<div class="card row"><div><div class="t">${hubName(th)}</div><div class="s">${esc(th.country)}</div></div><div style="text-align:right"><b class="num" style="font-size:20px">${top.flights}</b><div class="s">flights / week</div></div></div>`:empty('No flights yet. Open a route and assign an aircraft.')}`;
 }
 
 // ---- Fleet
@@ -192,13 +211,26 @@ function viewFleet(){
   if(!S.planes.length)return empty('No aircraft yet. Buy your first plane in the Buy tab.');
   const by={};S.planes.forEach(p=>(by[model(p.modelId).family]??=[]).push(p));const fam={};
   Object.keys(by).forEach(k=>fam[k]={n:by[k].length,html:famGroup(k,FAMILIES[k]+' Family',`${by[k].length} aircraft · ${by[k].filter(p=>p.sched.length).length} scheduled`,UI.open[k],'toggleFam',by[k].map(planeCard).join(''))});
-  return byMaker(fam);
+  return selBar('fleet',S.planes.length)+byMaker(fam);
 }
+function selBar(kind,total){
+  if(!UI.sel)return `<div class="row" style="margin-bottom:10px"><span class="s">${total} ${kind==='fleet'?'aircraft':'routes'}</span><button class="btn sm" onclick="selToggle()">Select</button></div>`;
+  const n=Object.keys(UI.picked).length;
+  return `<div class="card" style="padding:10px 12px"><div class="row"><b>${n} selected</b><div style="display:flex;gap:6px"><button class="btn sm" onclick="selAll('${kind}')">All</button><button class="btn sm" onclick="selToggle()">Done</button></div></div><div class="acts">${kind==='fleet'?`<button class="btn sm" onclick="refitMany()" ${n?'':'disabled'}>Re-config</button><button class="btn sm d" onclick="sellMany()" ${n?'':'disabled'}>Sell</button>`:`<button class="btn sm d" onclick="closeMany()" ${n?'':'disabled'}>Close routes</button>`}</div></div>`;
+}
+function selToggle(){UI.sel=!UI.sel;UI.picked={};render()}
+function selPick(id){if(UI.picked[id])delete UI.picked[id];else UI.picked[id]=1;render()}
+function selAll(kind){UI.picked={};(kind==='fleet'?S.planes:S.routes).forEach(x=>UI.picked[x.id]=1);render()}
+const pickedIds=()=>Object.keys(UI.picked).map(Number);
+function sellMany(){const ps=pickedIds().map(plane).filter(Boolean),v=ps.reduce((t,p)=>t+Math.round(model(p.modelId).price*SELL_RATE),0);
+  confirmDlg('Sell aircraft?',`Sell ${ps.length} aircraft for ${fmt(v)}? Their schedules will be removed.`,'Sell',()=>{S.planes=S.planes.filter(p=>!UI.picked[p.id]);S.cash+=v;UI.sel=false;UI.picked={};render()},true)}
+function refitMany(){const ps=pickedIds().map(plane).filter(Boolean);if(new Set(ps.map(p=>p.modelId)).size>1)return info('Different models','Select aircraft of the same model to re-config them together.');refitOpen(ps.map(p=>p.id))}
+function closeMany(){const ids=pickedIds();confirmDlg('Close routes?',`Close ${ids.length} route${ids.length>1?'s':''}? All schedules on them will be removed and their gates become free.`,'Close routes',()=>{S.routes=S.routes.filter(r=>!UI.picked[r.id]);S.planes.forEach(p=>p.sched=p.sched.filter(s=>route(s.rid)));UI.sel=false;UI.picked={};render()},true)}
 function planeCard(p){
-  const m=model(p.modelId),h=weekHours(p),c=cfgOf(p);
-  return `<div class="card"><div class="row"><div><span class="tag">${p.reg}</span> <span class="t">${m.name}</span> <span class="tag">${m.icao}</span><div class="s">${cfgStr(c)} · ${m.range} km · based ${hub(p.hubId).code}</div></div><span class="pill ${h?'on':''}">${h?Math.round(h)+'h/wk':'Idle'}</span></div>
-  ${h?`<div class="row s" style="margin-top:8px"><span>${p.sched.length} rotation${p.sched.length>1?'s':''}</span><span class="good">~${fmt(weekProfit(p))}/week</span></div>`:''}
-  <div class="acts"><button class="btn sm" onclick="setPage({t:'sched',id:${p.id}})">Schedule</button><button class="btn sm" onclick="refitOpen(${p.id})">Config</button><button class="btn sm d" onclick="sellPlane(${p.id})">Sell ${fmt(m.price*SELL_RATE)}</button></div></div>`;
+  const m=model(p.modelId),h=weekHours(p),c=cfgOf(p),on=!!UI.picked[p.id],wp=weekProfit(p);
+  const body=`<div class="row"><div><span class="tag">${p.reg}</span> <span class="t">${m.name}</span> <span class="tag">${m.icao}</span><div class="s">${cfgStr(c)} · ${fmtN(m.range)} km · based ${hub(p.hubId).code}</div></div><span class="pill ${h?'on':''}">${h?Math.round(h)+'h/wk':'Idle'}</span></div>${h?`<div class="row s" style="margin-top:8px"><span>${p.sched.length} rotation${p.sched.length>1?'s':''}</span><span class="${wp>=0?'good':'bad'}">~${fmt(wp)}/week</span></div>`:''}`;
+  if(UI.sel)return `<div class="card selc ${on?'on':''}" onclick="selPick(${p.id})"><div class="selrow"><span class="cb ${on?'on':''}"></span><div style="flex:1;min-width:0">${body}</div></div></div>`;
+  return `<div class="card"><div class="selrow"><div style="flex:1;min-width:0">${body}</div>${kebab('p'+p.id,[['Schedule',`setPage({t:'sched',id:${p.id}})`],['Re-config',`refitOpen([${p.id}])`],['Sell',`sellPlane(${p.id})`,'dn']])}</div></div>`;
 }
 function sellPlane(id){const p=plane(id),m=model(p.modelId),v=Math.round(m.price*SELL_RATE);confirmDlg('Sell aircraft?',`Sell ${p.reg} (${m.name}) for ${fmt(v)}? Its schedule will be removed.`,'Sell',()=>{S.planes=S.planes.filter(x=>x.id!==id);S.cash+=v;render()},true)}
 
@@ -209,7 +241,7 @@ function airportShop(kind){
 }
 function viewOwned(){
   const h0=seg('owned',[['routes','Routes'],['hubs','Hubs'],['gates','Gates']]);
-  if(UI.owned==='routes')return h0+`<button class="btn p" style="width:100%;margin-bottom:10px;padding:11px" onclick="openPage()">＋ Open route</button>`+(S.routes.length?S.routes.map(routeCard).join(''):empty('No routes yet. Open one from a hub.'));
+  if(UI.owned==='routes')return h0+`<button class="btn p" style="width:100%;margin-bottom:10px;padding:11px" onclick="openPage()">＋ Open route</button>`+(S.routes.length?selBar('routes',S.routes.length)+S.routes.map(routeCard).join(''):empty('No routes yet. Open one from a hub.'));
   if(UI.owned==='hubs')return h0+ownedHubs().map(id=>{const h=hub(id);return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${h.country} · Demand ${dem(h)}</div></div><div class="s" style="text-align:right">${S.routes.filter(r=>r.from===id).length} routes<br>${S.planes.filter(p=>p.hubId===id).length} planes</div></div>`}).join('')+airportShop('hubs');
   const ids=Object.keys(S.gates).filter(id=>S.gates[id]>0);
   if(!ids.length)return h0+empty('No gates yet. You buy gates when you open a route.');
@@ -218,10 +250,11 @@ function viewOwned(){
     return `<div class="card"><div class="row"><div class="t">${hubName(h)}</div><span class="pill">${rs.length}/${n} used</span></div><div style="margin-top:8px">${rows}</div></div>`}).join('');
 }
 function routeCard(r){
-  const f=hub(r.from),t=hub(r.to),a=sumD(alloc(r).rem),T=sumD(r.demand),L=legsWeek(r);
-  return `<div class="card" style="cursor:pointer" onclick="setPage({t:'route',id:${r.id}})"><div class="rl"><div><b>${f.code}</b><span>${esc(f.city)}</span></div><div class="ln"></div><div style="text-align:right"><b>${t.code}</b><span>${esc(t.city)}</span></div></div>
+  const f=hub(r.from),t=hub(r.to),a=sumD(alloc(r).rem),T=sumD(r.demand),L=legsWeek(r),on=!!UI.picked[r.id];
+  const body=`<div class="rl"><div><b>${f.code}</b><span>${esc(f.city)}</span></div><div class="ln"></div><div style="text-align:right"><b>${t.code}</b><span>${esc(t.city)}</span></div></div>
   <div class="row s" style="margin-top:10px"><span><span class="tag">${flightNos(r)[0]}</span> ${fmtN(r.distance)} km</span><span>${L/2} flights/week · ${S.planes.filter(p=>p.sched.some(s=>s.rid===r.id)).length} aircraft</span></div>
-  <div class="row s" style="margin-top:6px"><span>Demand left</span><span class="num">${fmtN(a)} / ${fmtN(T)}</span></div><div class="bar"><i style="width:${T?a/T*100:0}%"></i></div></div>`;
+  <div class="row s" style="margin-top:6px"><span>Passenger demand left</span><span class="num">${fmtN(a)} / ${fmtN(T)}</span></div><div class="bar"><i style="width:${T?a/T*100:0}%"></i></div>`;
+  return UI.sel?`<div class="card selc ${on?'on':''}" onclick="selPick(${r.id})"><div class="selrow"><span class="cb ${on?'on':''}"></span><div style="flex:1;min-width:0">${body}</div></div></div>`:`<div class="card" style="cursor:pointer" onclick="setPage({t:'route',id:${r.id}})">${body}</div>`;
 }
 
 // ---- Open route page
@@ -262,11 +295,11 @@ function confirmOpen(from,to){
   };
 }
 // ---- Route page
-const fareBox=r=>{const f=fareOf(r);return `<div class="fg">${[['Y','Economy'],['W','Premium'],['C','Business'],['F','First']].map(([k,l])=>`<label><span class="s">${l}</span><input type="number" min="1" value="${f[k]}" onchange="setFare(${r.id},'${k}',this.value)" aria-label="${l} fare"><small class="s">load ~${Math.round(lfk(r,k)*100)}%</small></label>`).join('')}</div>`};
+const fareBox=r=>{const f=fareOf(r);return `<div class="fg">${[['Y','Economy'],['W','Premium'],['C','Business'],['F','First'],['L','Parcels $/t'],['M','Medium cargo $/t']].map(([k,l])=>`<label><span class="s">${l}</span><input type="number" min="1" value="${f[k]}" onchange="setFare(${r.id},'${k}',this.value)" aria-label="${l} fare"><small class="s">load ~${Math.round(lfk(r,k)*100)}%</small></label>`).join('')}</div>`};
 function setFare(id,k,v){const r=route(id);if(!r)return;if(k==='*')r.fares=defFares(r.distance);else{const b=baseTicket(r.distance)*FR[k];fareOf(r)[k]=Math.max(Math.round(b*.5),Math.min(Math.round(b*2.2),Math.round(+v)||Math.round(b)))}save();render()}
 function pageRoute(id){
   const r=route(id),f=hub(r.from),t=hub(r.to),[n1,n2]=flightNos(r),L=legsWeek(r),A=alloc(r).rem;
-  const bars=[['Y','Economy'],['W','Premium eco.'],['C','Business']].map(([k,l])=>`<div style="margin-top:10px"><div class="row"><span class="s">${l} · left</span><span class="num s"><b style="color:var(--ink)">${fmtN(A[k])}</b> / ${fmtN(r.demand[k])}</span></div><div class="bar"><i style="width:${r.demand[k]?A[k]/r.demand[k]*100:0}%"></i></div></div>`).join('');
+  const bars=[['Y','Economy'],['W','Premium eco.'],['C','Business'],['L','Light cargo (parcels)'],['M','Medium cargo']].map(([k,l])=>{const u=k==='L'||k==='M'?' t':'';return `<div style="margin-top:10px"><div class="row"><span class="s">${l} · left</span><span class="num s"><b style="color:var(--ink)">${fmtN(A[k])}${u}</b> / ${fmtN(r.demand[k])}${u}</span></div><div class="bar"><i style="width:${r.demand[k]?A[k]/r.demand[k]*100:0}%"></i></div></div>`}).join('');
   const ps=S.planes.filter(p=>p.sched.some(s=>s.rid===id));
   return back(`<b>${n1} / ${n2}</b>`)+`<div class="card"><div class="rl"><div><b>${f.code}</b><span>${esc(f.city)}</span></div><div class="ln"></div><div style="text-align:right"><b>${t.code}</b><span>${esc(t.city)}</span></div></div><div class="row s" style="margin-top:10px"><span>${fmtN(r.distance)} km · ${t.icao}</span><span>${L/2} flights/week</span></div></div>
   <div class="card"><div class="row"><b>Weekly demand</b><span class="s">wk ${r.week+1}</span></div>${bars}${capLine(r)}</div>
@@ -287,7 +320,7 @@ function assignDlg(rid){
 // ---- Schedule
 const rotNos=(s,r)=>{const o=s.fn||flightNos(r)[0];return[o,/\d+$/.test(o)?o.replace(/\d+$/,x=>String(+x+1)):o+'B']};
 const dayTxt=s=>s.days.every(Boolean)?'Daily':DAYS.filter((d,k)=>s.days[k]).join(' ')||'No days';
-function bookedPct(p,s){const r=route(s.rid),a=alloc(r).out.get(s);return a?Math.round(Object.values(a.pax).reduce((x,y)=>x+y,0)/Math.max(1,seatsOf(cfgOf(p)))*100):0}
+function bookedPct(p,s){const r=route(s.rid),a=alloc(r).out.get(s);return a?Math.round(['Y','W','C','F'].reduce((x,k)=>x+a.pax[k],0)/Math.max(1,seatsOf(cfgOf(p)))*100):0}
 function addRot(p,rid,fill,dep0){
   const r=route(rid);if(!r||model(p.modelId).range<r.distance||p.hubId!==r.from)return false;let added=0;
   const tryAt=d=>{const s={rid,dep:d,days:[1,1,1,1,1,1,1].map(Boolean),seq:S.seq=(S.seq||0)+1};if(hasConflict(p,p.sched.concat([s])))return false;p.sched.push(s);added++;return true};
@@ -392,9 +425,10 @@ function buyBtn(){const mid=UI.page.mid,m=model(mid);return `Purchase ${UI.buyQ}
 function pageBuy(){
   const mid=UI.page.mid,m=model(mid),c=draft(mid),hubs=ownedHubs(),mk=Object.keys(MAKERS).find(k=>MAKERS[k].includes(m.family));
   const sum=KEYS.filter(k=>c[k].n).map(k=>`<div class="card row"><div><div class="s">${CNAME[k].toUpperCase()}</div><div class="t">${PROD[k][c[k].p][0]} <span class="s">· ${c[k].n} seats</span></div></div><span class="pill">${rate(k,c[k])}%</span></div>`).join('');
+  const cgRow=`<div class="card row"><div><div class="s">CARGO HOLD</div><div class="t">Light ${c.L.n} t · Medium ${c.M.n} t <span class="s">of ${cargoCap(m)} t</span></div></div></div>`;
   return back(`<span class="tag">${m.icao}</span>`)+`<div class="card hero"><div class="t" style="font-size:20px">${m.name}</div><div class="s">${mk} · ${FAMILIES[m.family]} Family</div><div class="tiles"><div><span class="s">Range</span><b class="num">${fmtN(m.range)} km</b></div><div><span class="s">Max seats</span><b class="num">${m.seats}</b></div><div><span class="s">Price</span><b class="num">${fmt(m.price)}</b></div></div></div>
   <div class="row" style="margin:18px 2px 8px"><b>Seat configuration</b><span class="s">${seatsOf(c)} seats${c.name?' · '+esc(c.name):''} · +${fmt(cfgCost(c))}</span></div>
-  <div class="acts" style="margin:0 0 10px"><button class="btn" onclick="loadDlg('${mid}')">Load config</button><button class="btn" onclick="setPage({t:'cfg',mid:'${mid}',mode:'buy'})">Edit config</button></div>${sum}
+  <div class="acts" style="margin:0 0 10px"><button class="btn" onclick="loadDlg('${mid}')">Load config</button><button class="btn" onclick="setPage({t:'cfg',mid:'${mid}',mode:'buy'})">Edit config</button></div>${sum}${cgRow}
   <h2>Delivery</h2>`+(hubs.length?`${dd('bh',hubs.map(i=>[i,`${hub(i).flag} ${esc(hub(i).city)} (${hub(i).code})`]),UI.buyHub||hubs[0],v=>{UI.buyHub=v})}
   <div class="row" style="margin:12px 0"><span class="s">Quantity</span><div class="step"><button class="btn sm" onclick="setQ(-1)">−</button><b id="bq">${UI.buyQ}</b><button class="btn sm" onclick="setQ(1)">+</button></div></div>
   <button class="btn p" id="bbtn" style="width:100%;padding:13px" onclick="doBuy('${mid}')">${buyBtn()}</button>`:`<div class="card row"><div class="s">You need a hub to base aircraft.</div><button class="btn sm p" onclick="go('owned','owned','hubs')">Buy hub</button></div>`);
@@ -407,16 +441,18 @@ function doBuy(mid){
   UI.tab='fleet';UI.page=null;render();
 }
 function pageCfg(){
-  const g=UI.page,m=model(g.mid),c=curCfg(),used=usedSpace(c),refit=g.mode==='refit';
+  const g=UI.page,m=model(g.mid),c=fixCfg(curCfg(),model(g.mid)),used=usedSpace(c),refit=g.mode==='refit',cc=cargoCap(m),mult=refit&&g.pids?g.pids.length:1;
+  const cargoCard=`<div class="card"><div class="row"><div><div class="s">CARGO HOLD</div><div class="t">Light ${c.L.n} t · Medium ${c.M.n} t <span class="s">of ${cc} t</span></div></div><span class="pill">${fmt((c.L.n*8000+c.M.n*12000)*SC)}</span></div>${[['L','Light cargo (parcels)'],['M','Medium cargo']].map(([k,l])=>`<div class="row" style="margin-top:10px"><span class="s">${l}</span><div class="step"><button class="btn sm" onclick="cfgCg('${k}',-5)">−5</button><button class="btn sm" onclick="cfgCg('${k}',-1)">−</button><b>${c[k].n} t</b><button class="btn sm" onclick="cfgCg('${k}',1)">+</button><button class="btn sm" onclick="cfgCg('${k}',5)">+5</button></div></div>`).join('')}</div>`;
   const cls=KEYS.map(k=>{const p=c[k],pr=PROD[k],lim=k==='Y'?[26,34]:[34,42];
     return `<div class="card"><div class="row"><div><div class="s">${CNAME[k].toUpperCase()}</div><div class="t">${pr[p.p][0]} <span class="s">· ${p.n} seats</span></div></div><span class="pill">${rate(k,p)}%</span></div>
     <div class="row" style="margin-top:10px"><span class="s">Seats</span><div class="step"><button class="btn sm" onclick="cfgN('${k}',-10)">−10</button><button class="btn sm" onclick="cfgN('${k}',-1)">−</button><b>${p.n}</b><button class="btn sm" onclick="cfgN('${k}',1)">+</button><button class="btn sm" onclick="cfgN('${k}',10)">+10</button></div></div>
     <div class="chips">${pr.map((x,i)=>`<button class="chip ${i===p.p?'on':''}" onclick="cfgProd('${k}',${i})">${x[0]}<small>${fmt(x[1]*SC)} / seat</small></button>`).join('')}</div>
     ${p.pt!=null&&k!=='F'&&k!=='C'?`<div class="row" style="margin-top:10px"><span class="s">Seat pitch</span><div class="step"><button class="btn sm" onclick="cfgPt('${k}',-1)" ${p.pt<=lim[0]?'disabled':''}>−</button><b>${p.pt} in</b><button class="btn sm" onclick="cfgPt('${k}',1)" ${p.pt>=lim[1]?'disabled':''}>+</button></div></div>`:''}</div>`}).join('');
-  return back(`<b>${m.name}</b>`,refit?{t:'sched'}:null,true)+`<div class="card"><div class="row"><div><div class="s">Seats</div><b class="num">${seatsOf(c)}</b></div><div style="text-align:center"><div class="s">Cabin space</div><b class="num">${Math.round(used)} / ${m.seats}</b></div><div style="text-align:right"><div class="s">${refit?'Refit cost':'Config cost'}</div><b class="num">${fmt(cfgCost(c))}</b></div></div><div class="bar"><i style="width:${Math.min(100,used/m.seats*100)}%"></i></div></div>${cls}
+  return back(`<b>${m.name}</b>`,refit?{t:'sched'}:null,true)+`<div class="card"><div class="row"><div><div class="s">Seats</div><b class="num">${seatsOf(c)}</b></div><div style="text-align:center"><div class="s">Cabin space</div><b class="num">${Math.round(used)} / ${m.seats}</b></div><div style="text-align:right"><div class="s">${refit?'Refit cost':'Config cost'}</div><b class="num">${fmt(cfgCost(c)*mult)}</b></div></div><div class="bar"><i style="width:${Math.min(100,used/m.seats*100)}%"></i></div></div>${cls}${cargoCard}
   <div class="acts"><button class="btn" onclick="saveDlg()">Save config</button><button class="btn" onclick="loadDlg('${g.mid}')">Load config</button></div>
-  <div class="acts">${refit?`<button class="btn p" onclick="applyRefit()">Apply · ${fmt(cfgCost(c))}</button>`:`<button class="btn p" onclick="setPage({t:'buy',mid:'${g.mid}'})">✓ Done</button>`}</div>`;
+  <div class="acts">${refit?`<button class="btn p" onclick="applyRefit()">Apply · ${fmt(cfgCost(c)*mult)}</button>`:`<button class="btn p" onclick="setPage({t:'buy',mid:'${g.mid}'})">✓ Done</button>`}</div>`;
 }
+function cfgCg(k,d){const c=curCfg(),m=model(UI.page.mid),o=k==='L'?'M':'L';fixCfg(c,m);delete c.name;c[k].n=Math.max(0,Math.min(cargoCap(m)-c[o].n,c[k].n+d));render()}
 function cfgN(k,d){const c=curCfg(),cap=model(UI.page.mid).seats,st=Math.sign(d);delete c.name;
   for(let i=0;i<Math.abs(d);i++){const bak=clone(c);c[k].n+=st;if(c[k].n<0){c[k].n=0;break}
     if(k!=='Y'&&st>0)while(usedSpace(c)>cap+1e-6&&c.Y.n>0)c.Y.n--; // make room by trimming economy
@@ -432,10 +468,11 @@ function loadDlg(mid){
   const L=S.cfgs[mid]||[];
   dlg(`<h3>Load config</h3><p style="margin-bottom:10px">${model(mid).name}</p>${L.length?L.map((e,i)=>`<div class="card"><div class="row"><div><div class="t">${esc(e.name)}</div><div class="s">${cfgStr(e.cfg)} · ${S.planes.filter(p=>p.modelId===mid&&p.cfg&&p.cfg.name===e.name).length} equipped</div></div><span class="pill">Y ${rate('Y',e.cfg.Y)}% · C ${rate('C',e.cfg.C)}%</span></div><div class="acts"><button class="btn sm p" onclick="pickCfg('${mid}',${i})">Select</button><button class="btn sm d" onclick="delCfg('${mid}',${i})">Delete</button></div></div>`).join(''):'<p>No saved configs yet. Edit a config and save it.</p>'}<div class="acts"><button class="btn" onclick="closeDlg()">Close</button></div>`);
 }
-function pickCfg(mid,i){const e=S.cfgs[mid][i];setCfg(Object.assign(clone(e.cfg),{name:e.name}));closeDlg();render()}
+function pickCfg(mid,i){const e=S.cfgs[mid][i];setCfg(fixCfg(Object.assign(clone(e.cfg),{name:e.name}),model(mid)));closeDlg();render()}
 function delCfg(mid,i){S.cfgs[mid].splice(i,1);loadDlg(mid)}
-function refitOpen(pid){const p=plane(pid);UI.refit=clone(cfgOf(p));setPage({t:'cfg',mid:p.modelId,mode:'refit',pid})}
-function applyRefit(){const p=plane(UI.page.pid),cost=cfgCost(UI.refit);if(S.cash<cost)return info('Insufficient funds',`You need ${fmt(cost-S.cash)} more.`);confirmDlg('Apply new config?',`${p.reg} will be refitted to ${cfgStr(UI.refit)} for ${fmt(cost)}.`,'Apply',()=>{S.cash-=cost;p.cfg=clone(UI.refit);UI.tab='fleet';UI.page=null;render()})}
+function refitOpen(pids){const ids=[].concat(pids),p=plane(ids[0]);UI.refit=clone(cfgOf(p));setPage({t:'cfg',mid:p.modelId,mode:'refit',pids:ids})}
+function applyRefit(){const ps=UI.page.pids.map(plane).filter(Boolean),cost=cfgCost(UI.refit)*ps.length;if(S.cash<cost)return info('Insufficient funds',`You need ${fmt(cost-S.cash)} more.`);
+  confirmDlg('Apply new config?',`${ps.length>1?ps.length+' aircraft':ps[0].reg} will be refitted to ${cfgStr(UI.refit)} for ${fmt(cost)}.`,'Apply',()=>{S.cash-=cost;ps.forEach(p=>p.cfg=clone(UI.refit));UI.tab='fleet';UI.page=null;UI.sel=false;UI.picked={};render()})}
 
 function buyList(){
   const q=UI.q.toLowerCase().trim(),v=UI.buy;
@@ -450,25 +487,53 @@ function buyList(){
 function buyHub(id){const h=hub(id);if(S.hubs[id])return;if(S.cash<h.price)return info('Insufficient funds',`You need ${fmt(h.price-S.cash)} more.`);confirmDlg('Buy hub?',`Acquire ${h.flag} ${h.city} (${h.code} · ${h.icao}) for ${fmt(h.price)}?\nAircraft are based at your hubs and routes start from them.`,'Buy hub',()=>{S.cash-=h.price;S.hubs[id]=true;render()})}
 
 // ---- Vault
-function viewVault(){
-  return `<div class="card" style="text-align:center;padding:28px 16px"><div class="s">Uncollected earnings</div><div class="num" style="font-size:34px;font-weight:700;letter-spacing:-.03em;margin:4px 0 14px">${fmt(S.vault)}</div><button class="btn p" onclick="collect()" ${S.vault<=0?'disabled':''} style="width:100%;padding:11px">Collect ${fmt(S.vault)}</button></div>
-  <div class="s" style="line-height:1.6;margin:0 2px 8px">Each flight credits its profit to the vault when it lands. Collect it to spend it.</div>
+function weekTotals(){
+  let px=0,cg=0,cost=0;
+  S.routes.forEach(r=>{const f=fareOf(r);alloc(r).out.forEach(a=>{for(const k of ['Y','W','C','F'])px+=a.pax[k]*a.legs*f[k];for(const k of ['L','M'])cg+=a.pax[k]*a.legs*f[k];cost+=a.cost})});
+  return{px,cg,cost,rev:px+cg,profit:px+cg-cost};
+}
+function viewFinance(){
+  const t=weekTotals(),sp=S.speed||4,perHr=t.profit*(3600*30*sp/10080),perDay=perHr*24,tot=Math.max(1,t.rev);
+  return `<div class="card hero"><div class="s">Estimated profit · real time</div><div class="row" style="margin-top:10px;align-items:flex-end"><div><div class="s">per hour</div><div class="num ${perHr>=0?'':'bad'}" style="font-size:28px;font-weight:700;letter-spacing:-.03em">${fmt(perHr)}</div></div><div style="text-align:right"><div class="s">per day</div><div class="num ${perDay>=0?'':'bad'}" style="font-size:28px;font-weight:700;letter-spacing:-.03em">${fmt(perDay)}</div></div></div><div class="s" style="margin-top:10px">At ×${sp} speed with your current schedules · ${fmt(t.profit)} per game week · ${fmt(t.profit/7)} per game day</div></div>
+  <div class="card"><div class="row"><b>Weekly breakdown</b><span class="s">game week</span></div>
+   <div class="row" style="margin-top:12px"><span class="s">Passengers</span><b class="num">${fmt(t.px)}</b></div><div class="bar"><i style="width:${t.px/tot*100}%"></i></div>
+   <div class="row" style="margin-top:10px"><span class="s">Cargo</span><b class="num">${fmt(t.cg)}</b></div><div class="bar"><i style="width:${t.cg/tot*100}%"></i></div>
+   <div class="row" style="margin-top:10px"><span class="s">Operating cost</span><b class="num bad">−${fmt(t.cost)}</b></div><div class="bar"><i style="width:${Math.min(100,t.cost/tot*100)}%"></i></div></div>
+  <div class="card" style="text-align:center;padding:22px 16px"><div class="s">Vault · uncollected earnings</div><div class="num" style="font-size:30px;font-weight:700;letter-spacing:-.03em;margin:4px 0 12px">${fmt(S.vault)}</div><button class="btn p" onclick="collect()" ${S.vault<=0?'disabled':''} style="width:100%;padding:11px">Collect ${fmt(S.vault)}</button></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><div class="s">Total revenue</div><b class="num">${fmt(S.totalRevenue)}</b></div><div class="card"><div class="s">Cash</div><b class="num">${fmt(S.cash)}</b></div></div>
   <div style="text-align:center;margin-top:24px"><button class="btn sm d" onclick="resetGame()">New airline</button><div class="s" style="margin-top:6px">Progress is saved automatically in this browser.</div></div>`;
 }
 function collect(){if(S.vault<=0)return;S.cash+=S.vault;S.vault=0;render()}
 
 // ==================== LOOP ====================
-let tickN=0;
-setInterval(()=>{
+// The game is driven by real elapsed time, not by timer ticks, so it keeps up when the tab is hidden
+// (browsers throttle timers) and catches up after the page was closed (offline progress, capped).
+const CATCHUP_MS=6*3600e3;
+let lastTs=Date.now(),carry=0,tickN=0;
+function run(n,chunk){while(n>0){const st=Math.min(n,chunk);simulate(st);n-=st}}
+// Whole weeks are fast-forwarded with the same allocation maths (one step per week instead of one per flight).
+function fastWeek(){S.clock+=WEEK;const w=Math.floor(S.clock/WEEK),AC={},al=r=>AC[r.id]??=alloc(r);S.routes.forEach(r=>newWeek(r,w));
+  S.planes.forEach(p=>p.sched.forEach(s=>{const r=route(s.rid),a=r&&al(r).out.get(s);if(a){const v=a.rev-a.cost;p.totalEarned=(p.totalEarned||0)+v;S.vault+=v;S.totalRevenue+=v}}))}
+function advance(ms,chunk){
+  carry+=ms/1000*30*(S.speed||4);let left=Math.floor(carry);carry-=left;
+  if(left>=2*WEEK){const pre=S.clock%WEEK?WEEK-S.clock%WEEK:0;run(pre,chunk);left-=pre;const wk=Math.floor(left/WEEK);for(let i=0;i<wk;i++)fastWeek();left-=wk*WEEK}
+  run(left,chunk);
+}
+const fmtAway=ms=>{const m=Math.round(ms/60000);return m>=60?Math.floor(m/60)+' h '+(m%60)+' min':m+' min'};
+function tick(){
   if(!window.READY)return;
-  simulate();tickN++;
-  if(tickN%2===0){S.history.nw.push(S.cash+S.vault);S.history.rev.push(S.totalRevenue);if(S.history.nw.length>240){S.history.nw.shift();S.history.rev.shift()}}
+  const now=Date.now(),dt=Math.max(0,Math.min(now-lastTs,CATCHUP_MS));lastTs=now;
+  advance(dt,dt>3000?240:60);tickN++;
+  if(tickN%4===0||dt>3000){S.history.nw.push(S.cash+S.vault);S.history.rev.push(S.totalRevenue);if(S.history.nw.length>240){S.history.nw.shift();S.history.rev.shift()}}
+  if(document.hidden){if(tickN%40===0)save();return}
   head();
   const ae=document.activeElement,busy=$('#ov').classList.contains('show')||(ae&&/INPUT|SELECT/.test(ae.tagName))||(UI.page&&/^(open|buy|cfg|rot)$/.test(UI.page.t))||UI.tab==='buy'||document.querySelector('.dd.open');
-  if(!busy&&tickN%4===0)render();else if(tickN%10===0)save();
-},1000);
-window.addEventListener('beforeunload',save);
+  if(!busy&&(tickN%8===0||dt>3000))render();else if(tickN%20===0)save();
+}
+// A worker timer is not throttled like a hidden tab's setInterval, so the game keeps running in the background.
+try{const w=new Worker(URL.createObjectURL(new Blob(['setInterval(()=>postMessage(0),500)'],{type:'text/javascript'})));w.onmessage=tick}catch(e){setInterval(tick,500)}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)save();else{tick();render()}});
+window.addEventListener('pagehide',save);window.addEventListener('beforeunload',save);
 
 // ==================== BOOT ====================
 async function boot(){
@@ -480,7 +545,13 @@ async function boot(){
       .sort((p,q)=>p.country.localeCompare(q.country)||p.city.localeCompare(q.city));
   }catch(e){$('#view').innerHTML=empty('Could not load the data files.<br>Serve this folder over http, e.g. <b>python3 -m http.server</b>, then open game.html.');return}
   load();if(!S.started){location.replace('index.html');return}
-  window.READY=true;render();
+  if(S.cash==null)S.cash=startCash();
+  window.READY=true;
+  const away=S.savedAt?Date.now()-S.savedAt:0;let msg=null;
+  if(away>30000){const ms=Math.min(away,CATCHUP_MS),before=S.cash+S.vault;advance(ms,240);S.history.nw.push(S.cash+S.vault);S.history.rev.push(S.totalRevenue);
+    const g=S.cash+S.vault-before,gd=Math.floor(ms/1000*30*(S.speed||4)/1440);
+    msg=`You were away ${fmtAway(away)}${away>CATCHUP_MS?' (only the first '+fmtAway(CATCHUP_MS)+' are simulated)':''}.\n${gd} game days passed and your fleet kept flying: ${g>=0?'+':'−'}${fmt(Math.abs(g))}.`}
+  lastTs=Date.now();render();if(msg)info('Welcome back',msg);
 }
 boot();
 </script>

@@ -165,3 +165,13 @@ label.s{display:block;margin:16px 2px 6px}
 .ddl button{display:block;width:100%;text-align:left;border:0;background:none;color:var(--ink);font:inherit;font-size:13px;padding:10px 11px;border-radius:9px;cursor:pointer}
 .ddl button:hover{background:var(--soft)}
 .ddl button.on{background:var(--accent);color:var(--on)}
+/* selection, kebab menu */
+.cb{width:22px;height:22px;border-radius:7px;border:1.5px solid var(--mute);background:var(--panel);flex:none;display:grid;place-items:center;font-size:13px;font-weight:700;color:var(--on)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.cb.on::after{content:"✓"}
+.selc{cursor:pointer}
+.selc.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.selrow{display:flex;gap:12px;align-items:flex-start}
+.kbtn{border:0;background:var(--soft);color:var(--ink);width:32px;height:32px;border-radius:10px;font-size:18px;line-height:1;cursor:pointer;flex:none}
+.kbtn:hover{background:var(--line)}
+.ddl button.dn{color:var(--bad)}
