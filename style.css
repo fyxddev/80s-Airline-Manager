@@ -175,3 +175,154 @@ label.s{display:block;margin:16px 2px 6px}
 .kbtn{border:0;background:var(--soft);color:var(--ink);width:32px;height:32px;border-radius:10px;font-size:18px;line-height:1;cursor:pointer;flex:none}
 .kbtn:hover{background:var(--line)}
 .ddl button.dn{color:var(--bad)}
+
+/* ======================================================================
+   THEMES (data-theme = light | dark) & STYLES (data-style = liquid | minimal)
+   Set on <html> by the tiny script in <head>; stored in localStorage.
+   ====================================================================== */
+:root{--edge:var(--line)}
+html[data-theme=dark]{color-scheme:dark;--bg:#0a0c11;--panel:#161a22;--panel2:#1d222c;--ink:#eef0f4;--mute:#9aa2b1;--line:rgba(255,255,255,.1);--edge:rgba(255,255,255,.1);--accent:#f1f3f6;--on:#10131a;--good:#3ecf8e;--bad:#ff6f61;--soft:rgba(255,255,255,.07)}
+html[data-theme=dark] body{background-image:radial-gradient(70% 40% at 50% -5%,#1a2030,transparent 70%)}
+html[data-theme=dark] nav{background:rgba(22,26,34,.8);box-shadow:0 10px 30px rgba(0,0,0,.5)}
+html[data-theme=dark] .btn.p:hover:not(:disabled){background:#fff}
+html[data-theme=dark] .chip.on small{color:rgba(16,19,26,.65)}
+html[data-theme=dark] .wk .b.g{background:#3a414d}
+html[data-theme=dark] .wk .b.g.t{background:#2a303a}
+html[data-theme=dark] .wk .b.g.r{background:#323945}
+html[data-theme=dark] .wk .b.c.o{background:#4a8bff}
+html[data-theme=dark] .wk .b.c.t{background:#2b4a85}
+html[data-theme=dark] .wk .b.c.r{background:#3d6bc4}
+html[data-theme=dark] *{scrollbar-color:rgba(255,255,255,.28) transparent}
+html[data-theme=dark] ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22);background-clip:content-box}
+
+/* ---------- Liquid glass ---------- */
+html[data-style=liquid]{--accent:#2b6cf0;--on:#fff;--bg:#e6edfb;--panel:rgba(255,255,255,.52);--panel2:rgba(255,255,255,.36);--soft:rgba(40,60,110,.07);--line:rgba(40,60,110,.12);--edge:rgba(255,255,255,.8)}
+html[data-style=liquid][data-theme=dark]{--accent:#6b9bff;--on:#07101f;--bg:#070a12;--panel:rgba(28,34,48,.5);--panel2:rgba(40,48,66,.42);--soft:rgba(255,255,255,.08);--line:rgba(255,255,255,.1);--edge:rgba(255,255,255,.2)}
+html[data-style=liquid] body{background-image:none}
+html[data-style=liquid] body::before{content:"";position:fixed;inset:-20%;z-index:-1;pointer-events:none;
+  background:radial-gradient(38% 32% at 18% 20%,rgba(94,160,255,.55),transparent 70%),radial-gradient(34% 30% at 82% 14%,rgba(255,140,200,.45),transparent 70%),radial-gradient(40% 34% at 70% 80%,rgba(120,230,190,.45),transparent 70%),radial-gradient(30% 28% at 12% 85%,rgba(255,206,120,.4),transparent 70%);
+  animation:drift 24s ease-in-out infinite alternate;will-change:transform}
+html[data-style=liquid][data-theme=dark] body::before{background:radial-gradient(38% 32% at 18% 20%,rgba(60,100,255,.38),transparent 70%),radial-gradient(34% 30% at 82% 14%,rgba(160,70,255,.3),transparent 70%),radial-gradient(40% 34% at 70% 80%,rgba(0,200,170,.22),transparent 70%),radial-gradient(30% 28% at 12% 85%,rgba(255,100,150,.2),transparent 70%)}
+@keyframes drift{0%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(3%,-2%,0) scale(1.06) rotate(3deg)}100%{transform:translate3d(-3%,3%,0) scale(1.1) rotate(-3deg)}}
+
+/* Blur lives on a pseudo-element for cards/panels: a real backdrop-filter on the card
+   would trap position:fixed dropdowns inside it. */
+html[data-style=liquid] :is(.card,.fam){position:relative;isolation:isolate}
+html[data-style=liquid] :is(.card,.fam)::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;pointer-events:none;-webkit-backdrop-filter:blur(22px) saturate(1.7);backdrop-filter:blur(22px) saturate(1.7)}
+html[data-style=liquid] :is(.stats span,.seg,.clist){-webkit-backdrop-filter:blur(22px) saturate(1.7);backdrop-filter:blur(22px) saturate(1.7)}
+html[data-style=liquid] :is(.card,.fam,.stats span,.clist){background:linear-gradient(150deg,rgba(255,255,255,.64),rgba(255,255,255,.22) 50%,rgba(255,255,255,.42));box-shadow:inset 0 1px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(255,255,255,.25),0 10px 34px rgba(50,70,140,.14)}
+html[data-style=liquid][data-theme=dark] :is(.card,.fam,.stats span,.clist){background:linear-gradient(150deg,rgba(255,255,255,.14),rgba(255,255,255,.04) 50%,rgba(255,255,255,.09));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -1px 0 rgba(255,255,255,.04),0 10px 34px rgba(0,0,0,.35)}
+html[data-style=liquid] :is(.card,.fam,.stats span,.tiles div,.seg,.clist,.dlg,.tpv,.ddb,input[type=text],input[type=number],input[type=time],select,.btn:not(.p),.chip:not(.on),.dy:not(.on),.kbtn,.cb:not(.on)){border-color:var(--edge)}
+html[data-style=liquid] .dlg{background:linear-gradient(150deg,rgba(255,255,255,.86),rgba(255,255,255,.7));box-shadow:inset 0 1px 0 #fff,0 30px 80px rgba(30,50,120,.28)}
+html[data-style=liquid][data-theme=dark] .dlg{background:linear-gradient(150deg,rgba(40,48,68,.88),rgba(24,29,42,.84));box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 30px 80px rgba(0,0,0,.6)}
+html[data-style=liquid] .ddl{background:rgba(255,255,255,.82);-webkit-backdrop-filter:blur(24px) saturate(1.8);backdrop-filter:blur(24px) saturate(1.8);border-color:var(--edge);box-shadow:inset 0 1px 0 #fff,0 16px 44px rgba(30,50,120,.25)}
+html[data-style=liquid][data-theme=dark] .ddl{background:rgba(30,36,52,.84);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 16px 44px rgba(0,0,0,.55)}
+html[data-style=liquid] .btn:not(.p){background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(255,255,255,.34));box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 2px 8px rgba(40,60,120,.1)}
+html[data-style=liquid][data-theme=dark] .btn:not(.p){background:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,.06));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 2px 8px rgba(0,0,0,.3)}
+html[data-style=liquid] .btn.p,html[data-style=liquid] .btn.p:hover:not(:disabled){background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 80%,#fff),var(--accent));border-color:color-mix(in srgb,var(--accent) 70%,#fff);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 8px 20px color-mix(in srgb,var(--accent) 38%,transparent)}
+html[data-style=liquid] .btn.p:hover:not(:disabled){filter:brightness(1.07)}
+html[data-style=liquid] .btn:hover:not(:disabled){transform:translateY(-1px)}
+html[data-style=liquid] .btn:active:not(:disabled){transform:scale(.96)}
+html[data-style=liquid] .btn.d{color:var(--bad)}
+html[data-style=liquid] :is(input[type=text],input[type=number],input[type=time],select,.ddb){background:rgba(255,255,255,.5);box-shadow:inset 0 1px 2px rgba(40,60,120,.08),inset 0 1px 0 rgba(255,255,255,.8)}
+html[data-style=liquid][data-theme=dark] :is(input[type=text],input[type=number],input[type=time],select,.ddb){background:rgba(255,255,255,.07);box-shadow:inset 0 1px 2px rgba(0,0,0,.3)}
+html[data-style=liquid] input:focus,html[data-style=liquid] select:focus{box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent);border-color:var(--accent)}
+html[data-style=liquid] .seg{background:rgba(255,255,255,.3);box-shadow:inset 0 1px 2px rgba(40,60,120,.1)}
+html[data-style=liquid][data-theme=dark] .seg{background:rgba(255,255,255,.06)}
+html[data-style=liquid] .seg button.on{background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(255,255,255,.65));color:var(--ink);box-shadow:inset 0 1px 0 #fff,0 3px 10px rgba(40,60,120,.18)}
+html[data-style=liquid][data-theme=dark] .seg button.on{background:linear-gradient(180deg,rgba(255,255,255,.26),rgba(255,255,255,.12));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 3px 10px rgba(0,0,0,.35)}
+html[data-style=liquid] .logo{background:linear-gradient(145deg,#5b9bff,#7c5cff);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 8px 20px rgba(90,110,255,.4)}
+html[data-style=liquid] .logo i{animation:fly 6s ease-in-out infinite}
+@keyframes fly{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(2px,-2px) rotate(-8deg)}}
+html[data-style=liquid] .hero{background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,transparent),rgba(255,255,255,.2) 60%)}
+html[data-style=liquid] .crow.on{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 80%,#fff),var(--accent))}
+html[data-style=liquid] .chip.on,html[data-style=liquid] .dy.on{box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 4px 12px color-mix(in srgb,var(--accent) 35%,transparent)}
+html[data-style=liquid] #ov{background:rgba(20,30,70,.28);-webkit-backdrop-filter:blur(10px) saturate(1.3);backdrop-filter:blur(10px) saturate(1.3)}
+
+/* ---------- Bottom bar: sliding indicator (both styles) ---------- */
+nav{display:grid;grid-template-columns:repeat(var(--n,6),1fr);gap:0;max-width:460px}
+nav::before{content:"";position:absolute;top:6px;bottom:6px;left:6px;width:calc((100% - 12px)/var(--n,6));border-radius:20px;background:var(--accent);transform:translateX(calc(var(--i,0)*100%));transition:transform .5s cubic-bezier(.34,1.35,.5,1),background .3s;z-index:0}
+nav button{position:relative;z-index:1}
+nav button.on{background:none;color:var(--on)}
+nav button:active{transform:scale(.92)}
+nav button i{transition:transform .35s cubic-bezier(.34,1.5,.5,1)}
+nav button.on i{transform:translateY(-1px) scale(1.12)}
+html[data-style=liquid] nav{border-radius:30px;background:linear-gradient(150deg,rgba(255,255,255,.66),rgba(255,255,255,.28));-webkit-backdrop-filter:blur(28px) saturate(1.9);backdrop-filter:blur(28px) saturate(1.9);border-color:var(--edge);box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 14px 40px rgba(40,70,160,.22)}
+html[data-style=liquid][data-theme=dark] nav{background:linear-gradient(150deg,rgba(255,255,255,.16),rgba(255,255,255,.05));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 14px 40px rgba(0,0,0,.5)}
+html[data-style=liquid] nav::before{border-radius:24px;background:linear-gradient(160deg,rgba(255,255,255,.98),rgba(255,255,255,.6));box-shadow:inset 0 1px 0 #fff,0 4px 14px rgba(40,70,160,.25)}
+html[data-style=liquid][data-theme=dark] nav::before{background:linear-gradient(160deg,rgba(255,255,255,.3),rgba(255,255,255,.12));box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 4px 14px rgba(0,0,0,.4)}
+html[data-style=liquid] nav button.on{color:var(--accent)}
+
+/* ---------- Motion ---------- */
+@keyframes rise{from{opacity:0;transform:translateY(16px) scale(.985)}}
+@keyframes riseL{from{opacity:0;transform:translateY(24px) scale(.97);filter:blur(8px)}}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.95)}}
+@keyframes fadeIn{from{opacity:0}}
+@keyframes navIn{from{transform:translate(-50%,46px) scale(.9);opacity:0}}
+/* "backwards" fill: nothing is left on the element afterwards, so fixed dropdowns keep working */
+.rise{animation:rise .5s cubic-bezier(.2,.8,.2,1) backwards}
+html[data-style=liquid] .rise{animation-name:riseL;animation-duration:.65s}
+header,.stats{animation:rise .6s cubic-bezier(.2,.8,.2,1) backwards}
+.stats{animation-delay:.08s}
+nav{animation:navIn .8s cubic-bezier(.2,.9,.3,1.15) .15s backwards}
+#ov.show{animation:fadeIn .25s ease-out}
+.dlg{animation:pop .38s cubic-bezier(.34,1.45,.5,1)}
+.btn,.chip,.dy,.crow,.kbtn{transition:transform .18s cubic-bezier(.34,1.5,.5,1),background .2s,box-shadow .2s,filter .2s}
+.crow:active,.chip:active,.dy:active{transform:scale(.96)}
+.bar i{transition:width .8s cubic-bezier(.2,.8,.2,1)}
+.wrap .box>*{animation:rise .6s cubic-bezier(.2,.8,.2,1) backwards}
+.wrap .box>*:nth-child(2){animation-delay:.06s}.wrap .box>*:nth-child(3){animation-delay:.12s}.wrap .box>*:nth-child(4){animation-delay:.18s}
+html[data-style=liquid] .wrap .box>*{animation-name:riseL;animation-duration:.7s}
+
+/* ---------- Settings page ---------- */
+.stylepick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.sp{border:1.5px solid var(--line);background:var(--panel2);color:var(--ink);font:inherit;font-weight:600;font-size:13px;border-radius:16px;padding:10px;cursor:pointer;text-align:left;transition:transform .25s cubic-bezier(.34,1.5,.5,1),border-color .2s,box-shadow .2s}
+.sp:active{transform:scale(.96)}
+.sp.on{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+.sp small{display:block;color:var(--mute);font-weight:500;font-size:11px;margin-top:2px}
+.pv{height:62px;border-radius:11px;margin-bottom:9px;position:relative;overflow:hidden}
+.pv.lq{background:linear-gradient(135deg,#7fb2ff,#c79bff 50%,#ffb3d1)}
+.pv.lq::after{content:"";position:absolute;left:12%;right:12%;top:22%;bottom:22%;border-radius:10px;background:linear-gradient(150deg,rgba(255,255,255,.75),rgba(255,255,255,.25));border:1px solid rgba(255,255,255,.8);box-shadow:inset 0 1px 0 #fff}
+.pv.mn{background:#eceef2;border:1px solid rgba(16,24,40,.1)}
+.pv.mn::after{content:"";position:absolute;left:12%;right:12%;top:22%;bottom:22%;border-radius:8px;background:#fff;border:1px solid rgba(16,24,40,.12)}
+html[data-theme=dark] .pv.mn{background:#0f1218;border-color:rgba(255,255,255,.1)}
+html[data-theme=dark] .pv.mn::after{background:#1a1f28;border-color:rgba(255,255,255,.12)}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:13px}
+.kv:first-of-type{border-top:0}.kv span:first-child{color:var(--mute)}
+
+/* ---------- Segmented control: sliding pill ---------- */
+.seg{position:relative;gap:0}
+.seg .segp{position:absolute;top:4px;bottom:4px;left:4px;width:calc((100% - 8px)/var(--n,2));border-radius:10px;background:var(--panel);box-shadow:0 1px 3px rgba(16,24,40,.12);transform:translateX(calc(var(--i,0)*100%));transition:transform .5s cubic-bezier(.34,1.35,.5,1);pointer-events:none}
+.seg button{position:relative;z-index:1;transition:color .25s}
+.seg button.on{background:none;box-shadow:none}
+html[data-style=liquid] .seg .segp{border-radius:12px;background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(255,255,255,.65));box-shadow:inset 0 1px 0 #fff,0 3px 10px rgba(40,60,120,.18)}
+html[data-style=liquid][data-theme=dark] .seg .segp{background:linear-gradient(180deg,rgba(255,255,255,.26),rgba(255,255,255,.12));box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 3px 10px rgba(0,0,0,.35)}
+html[data-style=liquid] .seg button.on,html[data-style=liquid][data-theme=dark] .seg button.on{background:none;box-shadow:none}
+
+/* ---------- Dropdown fix: lift the card that owns an open dropdown above its siblings ---------- */
+html[data-style=liquid] :is(.card,.fam):has(.dd.open){z-index:90}
+
+/* ---------- Icons ---------- */
+.bi{display:inline-flex;vertical-align:-2px;margin-right:6px;font-size:1.05em}
+.btn.sm .bi{margin-right:4px}
+h2 .bi,.s .bi{margin-right:6px;font-size:13px;opacity:.8}
+.ddl button .bi{color:var(--mute)}
+
+/* ---------- Dropdown search ---------- */
+.dd.open .ddl.hs{display:flex;flex-direction:column;overflow:hidden}
+.ddl .ddo{overflow-y:auto;min-height:0;flex:1}
+.ddl .ddo button{display:block}
+.ddl .dds{display:flex;align-items:center;gap:8px;padding:4px 10px 6px;margin:0 0 4px;border-bottom:1px solid var(--line);flex:none}
+.ddl .dds i{display:flex;color:var(--mute)}
+.ddl .dds input[type=text],.ddl .dds input[type=text]:focus{flex:1;width:auto;min-width:0;border:0;background:none;box-shadow:none;border-radius:0;padding:6px 0;font-size:13px;outline:none}
+.ddl .dde{display:none;padding:14px;text-align:center;color:var(--mute);font-size:13px}
+
+/* ---------- Wider dialog ---------- */
+.dlg.wide{max-width:620px}
+
+/* ---------- Pagination ---------- */
+.pgs{scroll-margin-top:56px}
+.pager{display:flex;align-items:center;justify-content:center;gap:6px;margin:14px 0 6px}
+.pager .btn{min-width:40px;padding:8px 10px;font-size:15px;line-height:1}
+.pager .pn{min-width:70px;text-align:center;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
+.pager .pn small{font-weight:500;color:var(--mute);font-size:12px}
