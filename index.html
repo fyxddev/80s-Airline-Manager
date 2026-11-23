@@ -6,6 +6,14 @@
 <title>Airline Manager</title>
 <link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css">
 <link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-solid-rounded/css/uicons-solid-rounded.css">
+<script>
+/* Appearance settings (theme + style), shared by index.html and game.html */
+(function(){var K='airline-manager-settings',d=document.documentElement,m=matchMedia('(prefers-color-scheme: dark)'),D={theme:'auto',style:'liquid'};
+function get(){try{return Object.assign({},D,JSON.parse(localStorage.getItem(K)||'{}'))}catch(e){return Object.assign({},D)}}
+function apply(){var s=get();d.dataset.theme=s.theme==='auto'?(m.matches?'dark':'light'):s.theme;d.dataset.style=s.style==='minimal'?'minimal':'liquid'}
+window.AMS={get:get,set:function(k,v){var s=get();s[k]=v;try{localStorage.setItem(K,JSON.stringify(s))}catch(e){}apply()}};
+if(m.addEventListener)m.addEventListener('change',apply);apply()})();
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -21,7 +29,7 @@
     <div class="s" style="text-align:center;margin-top:18px">Aircraft registration</div>
     <div class="reg" id="reg">—</div>
     <div class="s" style="text-align:center" id="hint">Your hubs will be airports in this country.</div>
-    <div class="acts"><button class="btn p" id="go" style="padding:12px" disabled>Start airline</button></div>
+    <div class="acts"><button class="btn p" id="go" style="padding:12px" disabled><i class="fi fi-sr-plane-departure bi"></i>Start airline</button></div>
   </div>
 </div></div>
 <script>
@@ -47,14 +55,14 @@ $('#go').onclick=()=>{
   const start=()=>{try{localStorage.setItem(SAVE_KEY,JSON.stringify({started:true,airlineName:name,homeCountry:sel.iso}))}catch(e){}location.href='game.html'};
   let has=false;try{has=!!JSON.parse(localStorage.getItem(SAVE_KEY)||'null')?.started}catch(e){}
   if(!has)return start();
-  $('#dlg').innerHTML=`<h3>Replace saved airline?</h3><p>Starting a new airline deletes your current progress.</p><div class="acts"><button class="btn" onclick="document.getElementById('ov').classList.remove('show')">Cancel</button><button class="btn d" id="ok">Replace</button></div>`;
+  $('#dlg').innerHTML=`<h3>Replace saved airline?</h3><p>Starting a new airline deletes your current progress.</p><div class="acts"><button class="btn" onclick="document.getElementById('ov').classList.remove('show')"><i class="fi fi-rr-cross-small bi"></i>Cancel</button><button class="btn d" id="ok"><i class="fi fi-rr-refresh bi"></i>Replace</button></div>`;
   $('#ov').classList.add('show');$('#ok').onclick=start;
 };
 
 // Existing save → offer to continue
 try{
   const d=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');
-  if(d&&d.started)$('#cont').innerHTML=`<a href="game.html" class="card row" style="text-decoration:none;color:inherit;cursor:pointer"><div><div class="s" style="margin:0">Continue</div><div class="t">${esc(d.airlineName)}</div></div><span class="btn p sm">Play</span></a>`;
+  if(d&&d.started)$('#cont').innerHTML=`<a href="game.html" class="card row" style="text-decoration:none;color:inherit;cursor:pointer"><div><div class="s" style="margin:0">Continue</div><div class="t">${esc(d.airlineName)}</div></div><span class="btn p sm"><i class="fi fi-rr-play bi"></i>Play</span></a>`;
 }catch(e){}
 
 fetch('data/countries.json').then(r=>{if(!r.ok)throw 0;return r.json()}).catch(()=>fetch('countries.json').then(r=>{if(!r.ok)throw 0;return r.json()})).then(list=>{
