@@ -6,6 +6,14 @@
 <title>Airline Manager</title>
 <link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-regular-rounded/css/uicons-regular-rounded.css">
 <link rel="stylesheet" href="https://cdn-uicons.flaticon.com/2.6.0/uicons-solid-rounded/css/uicons-solid-rounded.css">
+<script>
+/* Appearance settings (theme + style), shared by index.html and game.html */
+(function(){var K='airline-manager-settings',d=document.documentElement,m=matchMedia('(prefers-color-scheme: dark)'),D={theme:'auto',style:'liquid'};
+function get(){try{return Object.assign({},D,JSON.parse(localStorage.getItem(K)||'{}'))}catch(e){return Object.assign({},D)}}
+function apply(){var s=get();d.dataset.theme=s.theme==='auto'?(m.matches?'dark':'light'):s.theme;d.dataset.style=s.style==='minimal'?'minimal':'liquid'}
+window.AMS={get:get,set:function(k,v){var s=get();s[k]=v;try{localStorage.setItem(K,JSON.stringify(s))}catch(e){}apply()}};
+if(m.addEventListener)m.addEventListener('change',apply);apply()})();
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -134,15 +142,21 @@ function simulate(step){
 
 // ---- custom dropdown (replaces native <select>)
 const DD={};
-function dd(id,opts,val,on){DD[id]={val:String(val),on,opts};const cur=opts.find(o=>String(o[0])===String(val))||opts[0];
-  return `<div class="dd" id="dd-${id}"><button type="button" class="ddb" onclick="ddToggle('${id}',event)"><span>${cur[1]}</span><i class="fi fi-rr-angle-small-down"></i></button><div class="ddl">${opts.map(o=>`<button type="button" data-v="${esc(o[0])}" class="${String(o[0])===String(val)?'on':''}" onclick="ddPick('${id}',this.dataset.v)">${o[1]}</button>`).join('')}</div></div>`}
+function dd(id,opts,val,on,search){DD[id]={val:String(val),on,opts};const cur=opts.find(o=>String(o[0])===String(val))||opts[0];
+  const sr=search??opts.length>6;
+  return `<div class="dd" id="dd-${id}"><button type="button" class="ddb" onclick="ddToggle('${id}',event)"><span>${cur[1]}</span><i class="fi fi-rr-angle-small-down"></i></button><div class="ddl${sr?' hs':''}">${sr?`<div class="dds"><i class="fi fi-rr-search"></i><input type="text" placeholder="Search" autocomplete="off" aria-label="Search options" oninput="ddFilter('${id}',this.value)" onclick="event.stopPropagation()"></div>`:''}<div class="ddo">${opts.map(o=>`<button type="button" data-v="${esc(o[0])}" class="${String(o[0])===String(val)?'on':''}" onclick="ddPick('${id}',this.dataset.v)">${o[1]}</button>`).join('')}</div>${sr?'<div class="dde">No results</div>':''}</div></div>`}
+function ddFilter(id,q){const el=document.getElementById('dd-'+id);if(!el)return;q=q.toLowerCase().trim();let n=0;
+  el.querySelectorAll('.ddo button').forEach(b=>{const m=!q||b.textContent.toLowerCase().includes(q);b.style.display=m?'':'none';if(m)n++});
+  const e=el.querySelector('.dde');if(e)e.style.display=n?'none':'block'}
 function kebab(id,items){return `<div class="dd" id="dd-kb${id}" data-w="170"><button type="button" class="kbtn" aria-label="More actions" onclick="ddToggle('kb${id}',event)">⋮</button><div class="ddl">${items.map(([l,fn,c])=>`<button type="button" class="${c||''}" onclick="ddClose();${fn}">${l}</button>`).join('')}</div></div>`}
 function ddClose(){document.querySelectorAll('.dd.open').forEach(x=>x.classList.remove('open'))}
 function ddToggle(id,e){e.stopPropagation();const el=document.getElementById('dd-'+id),open=!el.classList.contains('open');ddClose();if(!open)return;
   const b=el.querySelector('.ddb,.kbtn').getBoundingClientRect(),w=+el.dataset.w||b.width,l=el.querySelector('.ddl'),below=innerHeight-b.bottom-16,above=b.top-16,up=below<200&&above>below;
-  l.style.left=(el.dataset.w?Math.max(8,b.right-w):b.left)+'px';l.style.width=w+'px';l.style.maxHeight=Math.min(280,up?above:below)+'px';
+  l.style.left=(el.dataset.w?Math.max(8,b.right-w):b.left)+'px';l.style.width=w+'px';l.style.maxHeight=Math.min(l.classList.contains('hs')?340:280,up?above:below)+'px';
   if(up){l.style.top='auto';l.style.bottom=(innerHeight-b.top+6)+'px'}else{l.style.bottom='auto';l.style.top=(b.bottom+6)+'px'}
-  el.classList.add('open')}
+  el.classList.add('open');
+  const inp=el.querySelector('.dds input');if(inp){inp.value='';ddFilter(id,'');if(matchMedia('(hover:hover)').matches)setTimeout(()=>inp.focus(),30)}
+  const cur=el.querySelector('.ddo button.on');if(cur&&cur.scrollIntoView)cur.scrollIntoView({block:'nearest'})}
 function ddPick(id,v){const d=DD[id],el=document.getElementById('dd-'+id);d.val=v;ddClose();
   el.querySelectorAll('.ddl button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
   el.querySelector('.ddb span').innerHTML=(d.opts.find(o=>String(o[0])===v)||d.opts[0])[1];if(d.on)d.on(v)}
@@ -151,7 +165,7 @@ window.addEventListener('scroll',e=>{if(!(e.target.closest&&e.target.closest('.d
 window.addEventListener('resize',ddClose);
 
 // ==================== DIALOGS ====================
-function dlg(h){$('#dlg').innerHTML=h;$('#ov').classList.add('show')}
+function dlg(h,cls){const d=$('#dlg');d.className='dlg'+(cls?' '+cls:'');d.innerHTML=h;decorate(d);$('#ov').classList.add('show')}
 function closeDlg(){$('#ov').classList.remove('show')}
 $('#ov').addEventListener('click',e=>{if(e.target.id==='ov')closeDlg()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDlg()});
@@ -159,7 +173,7 @@ function confirmDlg(t,m,ok,fn,danger){dlg(`<h3>${t}</h3><p>${m}</p><div class="a
 function info(t,m){dlg(`<h3>${t}</h3><p>${m}</p><div class="acts"><button class="btn p" onclick="closeDlg()">OK</button></div>`)}
 
 // ==================== RENDER ====================
-const TABS=[['home','Home','fi-sr-home'],['fleet','Fleet','fi-sr-plane'],['owned','Airport','fi-sr-marker'],['buy','Buy','fi-sr-shopping-cart'],['finance','Finances','fi-sr-vault']];
+const TABS=[['home','Home','fi-sr-home'],['fleet','Fleet','fi-sr-plane'],['owned','Airport','fi-sr-marker'],['buy','Buy','fi-sr-shopping-cart'],['finance','Finances','fi-sr-vault'],['more','More','fi-sr-menu-dots']];
 const seg=(key,items)=>`<div class="seg">${items.map(([v,l])=>`<button class="${UI[key]===v?'on':''}" onclick="setUI('${key}','${v}')">${l}</button>`).join('')}</div>`;
 const empty=t=>`<div class="empty"><i class="fi fi-rr-plane"></i>${t}</div>`;
 const back=(extra='',_t,toBuy)=>`<div class="row" style="margin-bottom:12px"><button class="btn sm" onclick="${toBuy?(UI.page.mode==='refit'?'UI.page=null;render()':`setPage({t:'buy',mid:'${UI.page.mid}'})`):'setPage(null)'}">‹ Back</button>${extra}</div>`;
@@ -170,15 +184,54 @@ function head(){
   $('#hName').textContent=S.airlineName;$('#hCash').textContent=fmt(S.cash);
   $('#hStats').innerHTML=[['fi-rr-clock',clockStr(S.clock)],['fi-rr-plane',S.planes.length],['fi-sr-marker',ownedHubs().length],['fi-rr-route',S.routes.length]].map(([i,n])=>`<span><i class="fi ${i}"></i>${n}</span>`).join('');
 }
+// ---- pagination (max 10 per page): « ‹ 1 / n › »
+const PG={},PER=10;
+function pgInfo(k,n){const pages=Math.max(1,Math.ceil(n/PER)),p=Math.min(Math.max(PG[k]||1,1),pages);PG[k]=p;return{p,pages}}
+function pageOf(k,arr,fn){if(!arr.length)return '';const{p,pages}=pgInfo(k,arr.length),a=arr.slice((p-1)*PER,p*PER).map(x=>fn(x)).join('');
+  const b=(l,t,dis,aria)=>`<button class="btn sm" onclick="pgSet('${k}',${t})" ${dis?'disabled':''} aria-label="${aria}">${l}</button>`;
+  return `<div class="pgs" id="pgs-${k}"></div>`+a+(pages>1?`<div class="pager">${b('«',1,p===1,'First page')}${b('‹',p-1,p===1,'Previous page')}<span class="pn">${p}<small> / ${pages}</small></span>${b('›',p+1,p===pages,'Next page')}${b('»',pages,p===pages,'Last page')}</div>`:'')}
+function pgSet(k,v){PG[k]=v;render();const a=document.getElementById('pgs-'+k);if(a&&a.scrollIntoView)a.scrollIntoView({behavior:'smooth',block:'start'})}
+
+// ---- icons: add Flaticon icons to buttons, headings and labels
+const IC_BTN=[[/^Back$/,'fi-rr-angle-small-left'],[/^Open route$/,'fi-rr-route'],[/^Add rotation$/,'fi-rr-plus'],[/^Add one$/,'fi-rr-plus'],[/^Fill the day$/,'fi-rr-calendar'],[/^Schedule$/,'fi-rr-calendar'],[/^(Select|Done|OK|Apply)$/,'fi-rr-check'],[/^Re-config$/,'fi-rr-settings'],[/^Sell/,'fi-rr-coins'],[/^Collect/,'fi-rr-coins'],[/^Close routes?$/,'fi-rr-cross-small'],[/^Cancel$/,'fi-rr-cross-small'],[/^Purchase/,'fi-rr-shopping-cart'],[/^(New airline|Start over)$/,'fi-rr-refresh'],[/^Buy hub$/,'fi-sr-marker']];
+const IC_HEAD={'Aircraft based here':'fi-sr-plane','Routes from here':'fi-rr-route','Buy a hub':'fi-sr-marker','Most active destination':'fi-sr-marker','Appearance':'fi-rr-palette','Airline':'fi-sr-plane-departure','Add rotation':'fi-rr-calendar','Insufficient funds':'fi-rr-coins','Welcome back':'fi-sr-plane-departure','Sort by':'fi-rr-sort-alt','Aircraft reference':'fi-rr-plane','Open route':'fi-rr-route'};
+function decorate(root){if(!root)return;
+  root.querySelectorAll('button.btn,.dd[id^="dd-kb"] .ddl button').forEach(b=>{if(b.querySelector('.bi'))return;const t=b.textContent.replace(/^[‹＋+]\s*/,'').trim(),m=IC_BTN.find(([r])=>r.test(t));
+    if(m)b.innerHTML='<i class="fi '+m[1]+' bi"></i>'+b.innerHTML.replace(/^[‹＋+]\s*/,'')});
+  root.querySelectorAll('h2,h3,.s').forEach(e=>{if(e.children.length)return;const ic=IC_HEAD[e.textContent.trim()];if(ic)e.innerHTML='<i class="fi '+ic+' bi"></i>'+e.innerHTML})}
+
+let LASTSIG=null;const SEGPREV={};
 function render(){ALCACHE=new Map();try{renderInner()}finally{ALCACHE=null}}
 function renderInner(){
   head();
   $('#nav').innerHTML=TABS.map(([t,l,ic])=>`<button class="${UI.tab===t?'on':''}" onclick="go('${t}')" aria-label="${l}"><i class="fi ${ic}"></i>${l}</button>`).join('');
+  const nv=$('#nav');nv.style.setProperty('--n',TABS.length);nv.style.setProperty('--i',Math.max(0,TABS.findIndex(t=>t[0]===UI.tab)));
   const pg=UI.page;if(pg&&((pg.t==='route'&&!route(pg.id))||(pg.t==='sched'&&!plane(pg.id))||(pg.t==='rot'&&!(plane(pg.pid)&&plane(pg.pid).sched[pg.i]))||(pg.t==='hub'&&!S.hubs[pg.id])))UI.page=null;
   const v=$('#view');
   if(UI.page)v.innerHTML=({open:pageOpen,route:()=>pageRoute(UI.page.id),sched:()=>pageSched(UI.page.id),hub:()=>pageHub(UI.page.id),rot:pageRot,buy:pageBuy,cfg:pageCfg})[UI.page.t]();
-  else v.innerHTML={home:viewHome,fleet:viewFleet,owned:viewOwned,buy:viewBuy,finance:viewFinance}[UI.tab]();
+  else v.innerHTML={home:viewHome,fleet:viewFleet,owned:viewOwned,buy:viewBuy,finance:viewFinance,more:viewMore}[UI.tab]();
+  const sig=UI.tab+'|'+(UI.page?UI.page.t+':'+(UI.page.id??UI.page.pid??UI.page.mid??''):'');
+  if(sig!==LASTSIG){LASTSIG=sig;[...v.children].forEach((c,i)=>{c.classList.add('rise');c.style.animationDelay=Math.min(i,9)*50+'ms'})}
+  v.querySelectorAll('.seg').forEach((s,k)=>{const bs=[...s.querySelectorAll('button')],cur=bs.findIndex(b=>b.classList.contains('on'));if(cur<0)return;
+    const key=sig+'#'+k,prev=SEGPREV[key],p=document.createElement('i');p.className='segp';p.style.setProperty('--n',bs.length);p.style.setProperty('--i',prev??cur);s.prepend(p);
+    if(prev!=null&&prev!==cur){void p.offsetWidth;p.style.setProperty('--i',cur)}SEGPREV[key]=cur});
+  decorate(v);
   save();
+}
+
+// ---- More (settings)
+function setSet(k,v){AMS.set(k,v);render()}
+function viewMore(){
+  const s=AMS.get(),c=country(S.homeCountry),o=(k,v,l)=>`<button class="${s[k]===v?'on':''}" onclick="setSet('${k}','${v}')">${l}</button>`;
+  const sp=(v,cls,l,d)=>`<button class="sp ${s.style===v?'on':''}" onclick="setSet('style','${v}')"><div class="pv ${cls}"></div>${l}<small>${d}</small></button>`;
+  return `<h2 style="margin-top:6px">Appearance</h2>
+  <div class="card"><div class="t">Theme</div><div class="s">Light, dark, or follow your device.</div>
+    <div class="seg" style="margin:12px 0 0">${o('theme','auto','Auto')}${o('theme','light','Light')}${o('theme','dark','Dark')}</div></div>
+  <div class="card"><div class="t">Style</div><div class="s">Glassy and animated, or flat and quiet.</div>
+    <div class="stylepick">${sp('liquid','lq','Liquid glass','Frosted, glowing')}${sp('minimal','mn','Minimal','Flat, simple')}</div></div>
+  <h2>Airline</h2>
+  <div class="card"><div class="kv"><span>Name</span><b>${esc(S.airlineName)}</b></div><div class="kv"><span>Registration</span><b>${c?(c.flag||flag(c.iso))+' '+esc(c.name)+' · '+esc(c.prefix):'—'}</b></div><div class="kv"><span>Game time</span><b>${clockStr(S.clock)}</b></div></div>
+  <div style="text-align:center;margin-top:24px"><button class="btn sm d" onclick="resetGame()">New airline</button><div class="s" style="margin-top:6px">Progress is saved automatically in this browser.</div></div>`;
 }
 
 // ---- Home
@@ -205,7 +258,7 @@ function toggleFam(k){UI.open[k]=!UI.open[k];render()}
 function viewFleet(){
   if(!S.planes.length)return empty('No aircraft yet. Buy your first plane in the Buy tab.');
   const by={};S.planes.forEach(p=>(by[model(p.modelId).family]??=[]).push(p));const fam={};
-  Object.keys(by).forEach(k=>fam[k]={n:by[k].length,html:famGroup(k,FAMILIES[k]+' Family',`${by[k].length} aircraft · ${by[k].filter(p=>p.sched.length).length} scheduled`,UI.open[k],'toggleFam',by[k].map(planeCard).join(''))});
+  Object.keys(by).forEach(k=>fam[k]={n:by[k].length,html:famGroup(k,FAMILIES[k]+' Family',`${by[k].length} aircraft · ${by[k].filter(p=>p.sched.length).length} scheduled`,UI.open[k],'toggleFam',pageOf('fleet:'+k,by[k],planeCard))});
   return selBar('fleet',S.planes.length)+byMaker(fam);
 }
 function selBar(kind,total){
@@ -231,22 +284,22 @@ function sellPlane(id){const p=plane(id),m=model(p.modelId),v=Math.round(m.price
 
 // ---- Owned
 function airportShop(){
-  setTimeout(()=>{const i=$('#bq2');if(i)i.oninput=e=>{UI.q=e.target.value;$('#bl').innerHTML=buyList()}});
+  setTimeout(()=>{const i=$('#bq2');if(i)i.oninput=e=>{UI.q=e.target.value;PG.shop=1;$('#bl').innerHTML=buyList()}});
   return `<h2>Buy a hub</h2><input type="text" id="bq2" placeholder="Search airports, ICAO or code" value="${esc(UI.q)}" style="margin-bottom:12px"><div id="bl">${buyList()}</div>`;
 }
 function viewOwned(){
   const h0=seg('owned',[['routes','Routes'],['hubs','Hubs']]);
-  if(UI.owned!=='hubs')return h0+`<button class="btn p" style="width:100%;margin-bottom:10px;padding:11px" onclick="openPage()">＋ Open route</button>`+(S.routes.length?selBar('routes',S.routes.length)+S.routes.map(routeCard).join(''):empty('No routes yet. Open one from a hub.'));
-  return h0+ownedHubs().map(id=>{const h=hub(id),st=S.hubStat[id]||{out:0,in:0};
-    return `<div class="card" style="cursor:pointer" onclick="setPage({t:'hub',id:'${id}'})"><div class="row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · Demand ${dem(h)}</div></div><i class="fi fi-rr-angle-small-down chev" style="transform:rotate(-90deg)"></i></div><div class="row s" style="margin-top:8px"><span>${S.routes.filter(r=>r.from===id).length} routes · ${S.planes.filter(p=>p.hubId===id).length} aircraft</span><span class="num">${fmtN(st.out+st.in)} passengers</span></div></div>`}).join('')+airportShop();
+  if(UI.owned!=='hubs')return h0+`<button class="btn p" style="width:100%;margin-bottom:10px;padding:11px" onclick="openPage()">＋ Open route</button>`+(S.routes.length?selBar('routes',S.routes.length)+pageOf('routes',S.routes,routeCard):empty('No routes yet. Open one from a hub.'));
+  return h0+pageOf('hubs',ownedHubs(),id=>{const h=hub(id),st=S.hubStat[id]||{out:0,in:0};
+    return `<div class="card" style="cursor:pointer" onclick="setPage({t:'hub',id:'${id}'})"><div class="row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · Demand ${dem(h)}</div></div><i class="fi fi-rr-angle-small-down chev" style="transform:rotate(-90deg)"></i></div><div class="row s" style="margin-top:8px"><span>${S.routes.filter(r=>r.from===id).length} routes · ${S.planes.filter(p=>p.hubId===id).length} aircraft</span><span class="num">${fmtN(st.out+st.in)} passengers</span></div></div>`})+airportShop();
 }
 function pageHub(id){
   const h=hub(id),st=S.hubStat[id]||{out:0,in:0,cargo:0},ps=S.planes.filter(p=>p.hubId===id),rs=S.routes.filter(r=>r.from===id),fl=rs.reduce((n,r)=>n+legsWeek(r)/2,0);
   return back(`<span class="tag">Code ${h.cls}</span>`)+`<div class="card hero"><div class="t" style="font-size:20px">${h.flag} ${esc(h.city)}</div><div class="s">${h.code} · ${h.icao} · ${esc(h.country)} · Demand ${dem(h)}</div>
    <div class="tiles"><div><span class="s">Passengers flown</span><b class="num">${fmtN(st.out+st.in)}</b></div><div><span class="s">Departed</span><b class="num">${fmtN(st.out)}</b></div><div><span class="s">Arrived</span><b class="num">${fmtN(st.in)}</b></div></div>
    <div class="tiles" style="margin-top:8px"><div><span class="s">Cargo flown</span><b class="num">${fmtN(st.cargo)} t</b></div><div><span class="s">Routes</span><b class="num">${rs.length}</b></div><div><span class="s">Flights/week</span><b class="num">${fmtN(fl)}</b></div></div></div>
-  <h2>Aircraft based here</h2>${ps.length?ps.map(p=>{const m=model(p.modelId),hh=weekHours(p),wp=weekProfit(p);return `<div class="card row"><div><span class="tag">${p.reg}</span> <span class="t">${m.name}</span> <span class="tag">Code ${m.cls}</span><div class="s">${hh?Math.round(hh)+' h/week · ':'Idle · '}<span class="${wp>=0?'good':'bad'}">${fmt(wp)}/wk</span></div></div><button class="btn sm" onclick="setPage({t:'sched',id:${p.id}})">Schedule</button></div>`}).join(''):`<div class="s" style="margin:0 2px 8px">No aircraft based here. Buy one in the Buy tab.</div>`}
-  <h2>Routes from here</h2>${rs.length?rs.map(r=>{const t=hub(r.to);return `<div class="card row" style="cursor:pointer" onclick="setPage({t:'route',id:${r.id}})"><div><div class="t">${h.code} ⇄ ${t.code} <span class="s">${esc(t.city)}</span></div><div class="s">${fmtN(r.distance)} km · ${legsWeek(r)/2} flights/week</div></div><i class="fi fi-rr-angle-small-down chev" style="transform:rotate(-90deg)"></i></div>`}).join(''):`<div class="s" style="margin:0 2px 8px">No routes yet.</div>`}`;
+  <h2>Aircraft based here</h2>${ps.length?pageOf('hubAc:'+id,ps,p=>{const m=model(p.modelId),hh=weekHours(p),wp=weekProfit(p);return `<div class="card row"><div><span class="tag">${p.reg}</span> <span class="t">${m.name}</span> <span class="tag">Code ${m.cls}</span><div class="s">${hh?Math.round(hh)+' h/week · ':'Idle · '}<span class="${wp>=0?'good':'bad'}">${fmt(wp)}/wk</span></div></div><button class="btn sm" onclick="setPage({t:'sched',id:${p.id}})">Schedule</button></div>`}):`<div class="s" style="margin:0 2px 8px">No aircraft based here. Buy one in the Buy tab.</div>`}
+  <h2>Routes from here</h2>${rs.length?pageOf('hubRt:'+id,rs,r=>{const t=hub(r.to);return `<div class="card row" style="cursor:pointer" onclick="setPage({t:'route',id:${r.id}})"><div><div class="t">${h.code} ⇄ ${t.code} <span class="s">${esc(t.city)}</span></div><div class="s">${fmtN(r.distance)} km · ${legsWeek(r)/2} flights/week</div></div><i class="fi fi-rr-angle-small-down chev" style="transform:rotate(-90deg)"></i></div>`}):`<div class="s" style="margin:0 2px 8px">No routes yet.</div>`}`;
 }
 function routeCard(r){
   const f=hub(r.from),t=hub(r.to),a=sumD(alloc(r).rem),T=sumD(r.demand),L=legsWeek(r),on=!!UI.picked[r.id];
@@ -259,22 +312,24 @@ function routeCard(r){
 // ---- Open route page
 function openPage(){if(!ownedHubs().length)return info('No hub yet','Buy a hub first (Airport → Hubs).');UI.rangeHub=ownedHubs().includes(UI.rangeHub)?UI.rangeHub:ownedHubs()[0];setPage({t:'open'})}
 const SORTS=[['dem_desc','Highest demand'],['dem_asc','Lowest demand'],['dist_desc','Farthest'],['dist_asc','Shortest'],['rot_desc','Most rotations'],['rot_asc','Fewest rotations']];
+// one representative aircraft per model (the registration stays on the plane, just not listed here)
+function refModels(list){const seen=new Set();return list.filter(p=>!seen.has(p.modelId)&&seen.add(p.modelId))}
 function refAc(){const p=UI.openAc?plane(+UI.openAc):null;return p&&p.hubId===UI.rangeHub?p:null}
 function openList(){
   const from=UI.rangeHub,ac=refAc(),m=ac?model(ac.modelId):null,km=m?m.range:UI.rangeKm,spd=m?m.speed:850,[k,dir]=UI.openSort.split('_'),key={dem:x=>x.w,dist:x=>x.d,rot:x=>x.rot};
   const list=HUBS.filter(h=>h.id!==from&&!S.routes.some(r=>r.from===from&&r.to===h.id)).map(h=>{const d=dist(from,h.id);return{h,d,w:routeM(from,h.id,d)/4.345,rot:1440/(2*fm(d,spd)+TURN)}}).filter(x=>x.d<=km&&(!m||clsIdx(x.h.cls)>=clsIdx(m.cls))).sort((a,b)=>dir==='asc'?key[k](a)-key[k](b):key[k](b)-key[k](a));
-  const rows=list.slice(0,40).map(({h,d,w,rot})=>{const c=openCost(from,h.id,d);
-    return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · ${fmtN(d)} km · ${rot.toFixed(1)} rot/day · ~${fmtN(w)} pax/wk</div></div><button class="btn sm p" onclick="confirmOpen('${from}','${h.id}')" ${S.cash<c?'disabled':''}>${fmt(c)}</button></div>`}).join('');
-  return `<div class="s" style="margin:0 2px 8px">${list.length} destinations${ac?' for '+ac.reg:''}${list.length>40?' · top 40 shown':''}</div>`+(rows||empty('No destinations match.'));
+  const rows=pageOf('open',list,({h,d,w,rot})=>{const c=openCost(from,h.id,d);
+    return `<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · ${fmtN(d)} km · ${rot.toFixed(1)} rot/day · ~${fmtN(w)} pax/wk</div></div><button class="btn sm p" onclick="confirmOpen('${from}','${h.id}')" ${S.cash<c?'disabled':''}>${fmt(c)}</button></div>`});
+  return `<div class="s" style="margin:0 2px 8px">${list.length} destinations${ac?' for '+ac.reg:''}</div>`+(rows||empty('No destinations match.'));
 }
 function pageOpen(){
   const hubs=ownedHubs(),ac=refAc(),acs=S.planes.filter(p=>p.hubId===UI.rangeHub),rg=ac?model(ac.modelId).range:UI.rangeKm;
-  return back('<b>Open route</b>')+(hubs.length>1?`<div style="margin-bottom:10px">${dd('oh',hubs.map(i=>[i,`${hub(i).flag} ${esc(hub(i).city)} (${hub(i).code} · ${hub(i).icao})`]),UI.rangeHub,v=>{UI.rangeHub=v;UI.openAc='';render()})}</div>`:`<div class="card row"><div class="t">${hubName(hub(UI.rangeHub))}</div><span class="pill">Hub</span></div>`)+
-  `<div class="card"><div class="s" style="margin-bottom:4px">Aircraft reference</div>${dd('oa',[['','None · use range slider'],...acs.map(p=>[p.id,`${p.reg} · ${esc(model(p.modelId).name)} · ${fmtN(model(p.modelId).range)} km`])],ac?ac.id:'',v=>{UI.openAc=v;render()})}
+  return back('<b>Open route</b>')+(hubs.length>1?`<div style="margin-bottom:10px">${dd('oh',hubs.map(i=>[i,`${hub(i).flag} ${esc(hub(i).city)} (${hub(i).code} · ${hub(i).icao})`]),UI.rangeHub,v=>{UI.rangeHub=v;UI.openAc='';PG.open=1;render()})}</div>`:`<div class="card row"><div class="t">${hubName(hub(UI.rangeHub))}</div><span class="pill">Hub</span></div>`)+
+  `<div class="card"><div class="s" style="margin-bottom:4px">Aircraft reference</div>${dd('oa',[['','None · use range slider'],...refModels(acs).map(p=>[p.id,`${esc(model(p.modelId).name)} · ${fmtN(model(p.modelId).range)} km`])],ac?(refModels(acs).find(p=>p.modelId===ac.modelId)||ac).id:'',v=>{UI.openAc=v;PG.open=1;render()})}
   <div class="row" style="margin-top:12px"><span class="s">Range${ac?' (from aircraft)':''}</span><b class="num" id="rk">${fmtN(rg)} km</b></div><input type="range" min="500" max="16000" step="100" value="${rg}" oninput="setRange(this.value)" ${ac?'disabled':''} aria-label="Range in km">
-  <div class="s" style="margin:10px 0 4px">Sort by</div>${dd('os',SORTS,UI.openSort,v=>{UI.openSort=v;$('#rl').innerHTML=openList()})}</div><div id="rl">${openList()}</div>`;
+  <div class="s" style="margin:10px 0 4px">Sort by</div>${dd('os',SORTS,UI.openSort,v=>{UI.openSort=v;PG.open=1;$('#rl').innerHTML=openList()})}</div><div id="rl">${openList()}</div>`;
 }
-function setRange(v,redraw){UI.rangeKm=+v;if(redraw)return render();$('#rk').textContent=fmtN(UI.rangeKm)+' km';$('#rl').innerHTML=openList()}
+function setRange(v,redraw){UI.rangeKm=+v;PG.open=1;if(redraw)return render();$('#rk').textContent=fmtN(UI.rangeKm)+' km';$('#rl').innerHTML=openList()}
 function confirmOpen(from,to){
   const f=hub(from),t=hub(to),d=dist(from,to),rc=openCost(from,to,d);
   if(S.cash<rc)return info('Insufficient funds',`You need ${fmt(rc-S.cash)} more.`);
@@ -324,7 +379,7 @@ function addRot(p,rid,fill,dep0){
 function addDlg(pid){
   const p=plane(pid),m=model(p.modelId),rs=S.routes.filter(r=>r.from===p.hubId&&r.distance<=m.range&&okCls(m,r));
   if(!rs.length)return info('No routes','Open a route from '+hub(p.hubId).code+' within '+fmtN(m.range)+' km first.');
-  dlg(`<h3>Add rotation</h3><p style="margin-bottom:10px">Round trip from ${hub(p.hubId).code}. Set the time and turnaround in the editor.</p>${dd('ar',rs.map(r=>[r.id,`${flightNos(r)[0]} · ${hub(r.from).code} ⇄ ${hub(r.to).code} · ${fmtN(r.distance)} km`]),rs[0].id)}<div class="acts"><button class="btn" id="a1">Add one</button><button class="btn p" id="a2">Fill the day</button></div>`);
+  dlg(`<h3>Add rotation</h3><p style="margin-bottom:10px">Round trip from ${hub(p.hubId).code}. Set the time and turnaround in the editor.</p>${dd('ar',rs.map(r=>[r.id,`${flightNos(r)[0]} · ${hub(r.from).code} ⇄ ${hub(r.to).code} · ${fmtN(r.distance)} km`]),rs[0].id,null,true)}<div class="acts"><button class="btn" id="a1">Add one</button><button class="btn p" id="a2">Fill the day</button></div>`,'wide');
   $('#a1').onclick=()=>{const ok=addRot(p,+DD.ar.val,false);closeDlg();if(!ok)info('No free time','No free slot for another rotation.');else setPage({t:'rot',pid,i:p.sched.length-1})};
   $('#a2').onclick=()=>{const ok=addRot(p,+DD.ar.val,true);closeDlg();if(!ok)info('No free time','No free slot for another rotation.');else render()};
 }
@@ -470,7 +525,7 @@ function buyList(){
   const q=UI.q.toLowerCase().trim();
   const list=HUBS.filter(h=>h.iso===S.homeCountry&&(!q||[h.city,h.country,h.code,h.icao,h.cls].some(x=>x.toLowerCase().includes(q)))).sort((a,b)=>b.demand-a.demand);
   if(!list.length)return empty('No airports match.');
-  return list.map(h=>`<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · Demand ${dem(h)}</div></div>${S.hubs[h.id]?'<span class="pill on">Owned</span>':`<button class="btn sm p" onclick="buyHub('${h.id}')" ${S.cash<h.price?'disabled':''}>${fmt(h.price)}</button>`}</div>`).join('');
+  return pageOf('shop',list,h=>`<div class="card row"><div><div class="t">${hubName(h)}</div><div class="s">${esc(h.country)} · Demand ${dem(h)}</div></div>${S.hubs[h.id]?'<span class="pill on">Owned</span>':`<button class="btn sm p" onclick="buyHub('${h.id}')" ${S.cash<h.price?'disabled':''}>${fmt(h.price)}</button>`}</div>`);
 }
 function buyHub(id){const h=hub(id);if(S.hubs[id])return;if(S.cash<h.price)return info('Insufficient funds',`You need ${fmt(h.price-S.cash)} more.`);confirmDlg('Buy hub?',`Acquire ${h.flag} ${h.city} (${h.code} · ${h.icao}) for ${fmt(h.price)}?\nAircraft are based at your hubs and routes start from them.`,'Buy hub',()=>{S.cash-=h.price;S.hubs[id]=true;render()})}
 
@@ -488,8 +543,7 @@ function viewFinance(){
    <div class="row" style="margin-top:10px"><span class="s">Cargo</span><b class="num">${fmt(t.cg)}</b></div><div class="bar"><i style="width:${t.cg/tot*100}%"></i></div>
    <div class="row" style="margin-top:10px"><span class="s">Operating cost</span><b class="num bad">−${fmt(t.cost)}</b></div><div class="bar"><i style="width:${Math.min(100,t.cost/tot*100)}%"></i></div></div>
   <div class="card" style="text-align:center;padding:22px 16px"><div class="s">Vault · uncollected earnings</div><div class="num" style="font-size:30px;font-weight:700;letter-spacing:-.03em;margin:4px 0 12px">${fmt(S.vault)}</div><button class="btn p" onclick="collect()" ${S.vault<=0?'disabled':''} style="width:100%;padding:11px">Collect ${fmt(S.vault)}</button></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><div class="s">Total revenue</div><b class="num">${fmt(S.totalRevenue)}</b></div><div class="card"><div class="s">Cash</div><b class="num">${fmt(S.cash)}</b></div></div>
-  <div style="text-align:center;margin-top:24px"><button class="btn sm d" onclick="resetGame()">New airline</button><div class="s" style="margin-top:6px">Progress is saved automatically in this browser.</div></div>`;
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div class="card"><div class="s">Total revenue</div><b class="num">${fmt(S.totalRevenue)}</b></div><div class="card"><div class="s">Cash</div><b class="num">${fmt(S.cash)}</b></div></div>`;
 }
 function collect(){if(S.vault<=0)return;S.cash+=S.vault;S.vault=0;render()}
 
