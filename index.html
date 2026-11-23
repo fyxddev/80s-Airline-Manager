@@ -16,7 +16,7 @@
     <label class="s" for="nm" style="margin-top:0">Airline name</label>
     <input type="text" id="nm" maxlength="30" value="Sky Pacific Airlines" autocomplete="off">
     <label class="s" for="cq">Registration country</label>
-    <input type="text" id="cq" placeholder="Search 190+ countries" autocomplete="off">
+    <input type="text" id="cq" placeholder="Search countries" autocomplete="off">
     <div class="clist" id="cl" role="listbox" aria-label="Countries"></div>
     <div class="s" style="text-align:center;margin-top:18px">Aircraft registration</div>
     <div class="reg" id="reg">—</div>
@@ -25,13 +25,13 @@
   </div>
 </div></div>
 <script>
-const SAVE_KEY='airline-manager-save-v5';
+const SAVE_KEY='airline-manager-save-v7';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const flag=iso=>String.fromCodePoint(...[...iso].map(c=>127397+c.charCodeAt(0)));
 let C=[],sel=null;
 
-function sample(c){return c.prefix==='N'?'N101':c.prefix+'-ABC'}
+function sample(c){return c.prefix==='N'?'N101':c.prefix==='CCCP'?'CCCP-65001':c.prefix+'-ABC'}
 function draw(){
   const q=$('#cq').value.toLowerCase().trim();
   const list=C.filter(c=>!q||c.name.toLowerCase().includes(q)||c.prefix.toLowerCase().includes(q));
@@ -58,7 +58,7 @@ try{
 }catch(e){}
 
 fetch('data/countries.json').then(r=>{if(!r.ok)throw 0;return r.json()}).catch(()=>fetch('countries.json').then(r=>{if(!r.ok)throw 0;return r.json()})).then(list=>{
-  C=list.map(c=>({...c,flag:flag(c.iso)})).sort((a,b)=>a.name.localeCompare(b.name));
+  C=list.map(c=>({...c,flag:c.flag||flag(c.iso)})).sort((a,b)=>a.name.localeCompare(b.name));
   const me=C.find(c=>c.iso==='ID');sel=me;draw();
 }).catch(()=>{$('#cl').innerHTML='<div class="empty" style="padding:24px">Could not load countries.json.<br>Put it in a <b>data</b> folder next to index.html and serve the folder over http.</div>'});
 </script>
